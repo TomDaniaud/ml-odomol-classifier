@@ -5,8 +5,6 @@ Research repository for a tool that BandLab users can easily apply to their voca
 # Quick Start
 ## Prerequisites
  - Python 3.12+
- - gcloud CLI (installation guide here)
- - Access to the BandLab PoC SG project on gcloud
 
 ## Setup and Launch Training
 
@@ -21,14 +19,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 3. Setup environment
 uv sync
 
-# 4. Authenticate with the gcloud CLI
-gcloud auth login
-
-# 5. Set your gcloud project to the BandLab PoC SG project
-gcloud config set project bandlab-poc-sg
-
-# 6. Launch training with default config
+# 4. Launch training with default config
 uv run src/train.py experiment=first
+
+# 5. See your results on tensorboard
+uv run tensorboard --logdir logs/tensorboard
 ```
 
 ## Linting and Formatting
