@@ -1,0 +1,23 @@
+#To shadow personnal scripts
+*.shadow.*
+*.shadow
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# VS Code
+.vscode
+
+# Hydra
+logs
+
+# MLflow
+mlruns
