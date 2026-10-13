@@ -1,7 +1,0 @@
-tensorboard:
-  _target_: lightning.pytorch.loggers.TensorBoardLogger
-  experiment_name: ???
-  run_name: ???
-  tags: ???
-  prefix: ""
-  artifact_location: null

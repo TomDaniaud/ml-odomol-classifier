@@ -2,6 +2,7 @@ _target_: src.models.example_module.ExampleLightningModule
 
 net:
   _target_: src.models.components.identity_net.IdentityNet
+  num_channels: null
 
 criterion:
   _target_: torch.nn.CrossEntropyLoss

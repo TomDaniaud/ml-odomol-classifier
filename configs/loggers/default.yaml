@@ -1,3 +1,0 @@
-# Add to this to use multiple loggers at once
-defaults:
-  - tensorboard

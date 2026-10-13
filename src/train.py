@@ -10,10 +10,12 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer, s
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
+from utils.resolvers import register_resolvers
+
 # Log full error tracebacks
 os.environ["HYDRA_FULL_ERROR"] = "1"
-# Set PYTHONPATH based on `.project-root` file location
-rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+# Set PYTHONPATH based on `pyproject.toml` file location
+rootutils.setup_root(__file__, indicator="pyproject.toml", pythonpath=True)
 # Set up logger, capture warnings and PyTorch Lightning logs
 logging.captureWarnings(True)
 log = logging.getLogger(__name__)
@@ -22,6 +24,7 @@ for name in ["lightning", "lightning.pytorch"]:
     lg.handlers.clear()
     lg.propagate = True
 
+register_resolvers()
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default.yaml")
 def main(cfg: DictConfig):
@@ -30,7 +33,7 @@ def main(cfg: DictConfig):
     log.info(f":page_facing_up: {'[bold green]Description:[/]':<35}{cfg.description}")
     log.info(
         f":file_folder: {'[bold green]Output directory:[/]':<35}"
-        f"./{Path(HydraConfig.get().run.dir).relative_to(rootutils.find_root())}"
+        f"./{Path(HydraConfig.get().run.dir).resolve().relative_to(rootutils.find_root())}"
     )
 
     if seed := cfg.get("seed"):

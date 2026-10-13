@@ -7,10 +7,9 @@ defaults:
   - data: example
   - model: model
   - callbacks: default
-  - loggers: default
+  - loggers: tensorboard
   - trainer: default
   - paths: default
-  - hydra: default
 
   # experiment configs allow for version control of specific hyperparameters
   - experiment: null
@@ -21,4 +20,8 @@ defaults:
 # task name, determines output directory path
 task_name: "train"
 
-experiment_name: "Voice Declipping"
+run_name: null
+
+description: null
+
+seed: 64

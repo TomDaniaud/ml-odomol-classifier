@@ -7,8 +7,6 @@ defaults:
   - override /data: example
   - override /callbacks: default
 
-tags:
-  model: simple
 run_name: "first"
 description: "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
 
@@ -29,9 +27,3 @@ data:
   batch_size: 64
   dataset_class:
     strict_validation: false
-
-loggers:
-  tensorboard:
-    tags: ${tags}
-    run_name: ${run_name}
-    experiment_name: ${experiment_name}
