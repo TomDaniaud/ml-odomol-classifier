@@ -10,8 +10,6 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer, s
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
-from utils.resolvers import register_resolvers
-
 # Log full error tracebacks
 os.environ["HYDRA_FULL_ERROR"] = "1"
 # Set PYTHONPATH based on `.project-root` file location
@@ -23,8 +21,6 @@ for name in ["lightning", "lightning.pytorch"]:
     lg = logging.getLogger(name)
     lg.handlers.clear()
     lg.propagate = True
-# Register all omegaconf resolvers
-register_resolvers()
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default.yaml")

@@ -1,4 +1,4 @@
 # Default tags for mlflow
 
-mlflow.note.content: ${description}
+tensorboard.note.content: ${description}
 user: ${local_username:}
