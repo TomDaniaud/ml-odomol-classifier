@@ -1,0 +1,12 @@
+_target_: src.data.datamodule.ExampleDataModule
+
+dataset_class:
+  _partial_: true
+  _target_: src.data.components.unimol_dataset.UnimolOdorDataset
+  data_file: ${paths.root_dir}/data/unimol_embeddings.pt
+
+batch_size: 32  # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+train_val_test_split: [0.8, 0.1, 0.1]
+num_workers: 0
+pin_memory: False
+seed: ${seed}
