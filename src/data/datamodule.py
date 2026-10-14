@@ -19,6 +19,7 @@ class ExampleDataModule(LightningDataModule):
         train_val_test_split: list[float | int],
         num_workers: int,
         pin_memory: bool,
+        persistent_workers:bool,
         seed: int = 64,
     ):
         """
@@ -35,6 +36,8 @@ class ExampleDataModule(LightningDataModule):
         :type num_workers: int
         :param pin_memory: If True, the dataloader will copy Tensors
             into device/CUDA pinned memory before returning them.
+        :param persistent_workers: To set persistent workers
+        :type: bool
         :type pin_memory: bool
         :param seed: Seed for data generation.
         :type seed: int
@@ -50,6 +53,7 @@ class ExampleDataModule(LightningDataModule):
         self.train_val_test_split = train_val_test_split
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
         self.seed = seed
         # These will be set in setup
         self.data_train: Dataset | None = None
@@ -94,6 +98,7 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=True,
+                persistent_workers=self.persistent_workers
             )
         raise ValueError("`self.data_train` is `None`. Ensure you call `self.setup` before calling this function.")
 
@@ -105,6 +110,7 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=False,
+                persistent_workers=self.persistent_workers
             )
         raise ValueError("`self.data_valid` is `None`. Ensure you call `self.setup` before calling this function.")
 
@@ -116,5 +122,6 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=False,
+                persistent_workers=self.persistent_workers
             )
         raise ValueError("`self.data_test` is `None`. Ensure you call `self.setup` before calling this function.")

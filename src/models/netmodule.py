@@ -114,7 +114,7 @@ class ClassifierLightningModule(LightningModule):
         targets_int = targets.to(dtype=torch.long)
         self.val_loss(loss.detach())
         self.log(
-            "val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True
+            "valid/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True
         )
 
         # Mise à jour des métriques avec les bons formats :
@@ -125,14 +125,14 @@ class ClassifierLightningModule(LightningModule):
         self.val_auroc.update(probs, targets_int)
 
         self.log(
-            "val/f1_macro",
+            "valid/f1_macro",
             self.val_f1_macro,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "val/auroc_macro",
+            "valid/auroc_macro",
             self.val_auroc,
             on_step=False,
             on_epoch=True,
