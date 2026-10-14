@@ -1,11 +1,18 @@
+import sys
 from pathlib import Path
+import rootutils
 import torch
 from torch.utils.data import DataLoader
 
+# Configuration automatique du PYTHONPATH basé sur le répertoire racine du projet
+root = rootutils.setup_root(__file__, indicator="pyproject.toml", pythonpath=True)
+sys.path.append(str(root / "src"))
+
 from data.components.smiles_odor_dataset import SmilesOdorDataset
 
+
 def test():
-    csv_file = Path("data/smiles_odor_dataset.csv")
+    csv_file = root / "data" / "smiles_odor_dataset.csv"
     print(f"--- 1. Vérification du fichier CSV : {csv_file.resolve()} ---")
     assert csv_file.exists(), f"Le fichier {csv_file} est introuvable !"
 
@@ -21,10 +28,10 @@ def test():
     print(f"Numéros atomiques shape : {sample_data['atomic_nums'].shape} ({sample_data['atomic_nums']})")
     print(f"Target shape : {sample_target.shape} (somme des odeurs positives: {sample_target.sum().item()})")
 
-    print("\n--- 4. Test d'un DataLoader (batch_size=1) ---")
-    loader = DataLoader(dataset, batch_size=1, shuffle=False)
-    for batch_data, batch_target in loader:
-        print(f"Batch data 'pos' shape : {batch_data['pos'].shape}")
+    print("\n--- 4. Test d'un DataLoader (batch_size=4) ---")
+    loader = DataLoader(dataset, batch_size=4, shuffle=False)
+    for batch_smiles, batch_target in loader:
+        print(f"Batch SMILES (taille {len(batch_smiles)}) : {list(batch_smiles)}")
         print(f"Batch target shape : {batch_target.shape}")
         break
 
@@ -32,3 +39,4 @@ def test():
 
 if __name__ == "__main__":
     test()
+
