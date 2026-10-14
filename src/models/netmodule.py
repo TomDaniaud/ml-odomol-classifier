@@ -91,7 +91,7 @@ class ClassifierLightningModule(LightningModule):
         :rtype: torch.Tensor
         """
 
-        loss, _preds, _targets = self.model_step(batch)
+        loss, _probs, _preds, _targets = self.model_step(batch)
         self.train_loss(loss.detach())  # Just for logging, so detach before accumulating
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss

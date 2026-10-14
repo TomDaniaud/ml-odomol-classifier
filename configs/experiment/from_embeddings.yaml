@@ -1,0 +1,22 @@
+# @package _global_
+
+defaults:
+  - /tags: default
+  - override /trainer: default
+  - override /model: classifier
+  - override /data: unimol
+  - override /callbacks: default
+
+run_name: "first-from-embedding"
+description: "Loading unimol precomputed embdding from smiles dataset and run a classification head to label odors"
+
+seed: 64
+float32_matmul_precision: high
+
+trainer:
+  max_epochs: 10
+  gradient_clip_val: 1.0
+
+
+# data:
+  # batch_size: 64

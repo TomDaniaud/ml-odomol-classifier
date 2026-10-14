@@ -7,7 +7,7 @@ from head import ClassificationHead
 
 class OdomolNet(nn.Module):
     """
-    A network that run classification on unimol embedding.
+    A network that run classification trough unimol embedding (backbone) then run the classifications layer (head).
     """
 
     def __init__(self, hidden_channels:int, nb_labels:int, dropout:int):

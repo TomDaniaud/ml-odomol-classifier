@@ -15,7 +15,7 @@ class UnimolOdorDataset(Dataset):
 
     def __init__(
         self,
-        data_file: str | Path = "data/unimol_embeddings.pt",
+        data_file: str | Path,
     ):
         super().__init__()
         self.file_path = Path(data_file)
