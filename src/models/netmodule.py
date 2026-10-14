@@ -4,16 +4,18 @@ import torch
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import OptimizerConfig, OptimizerLRSchedulerConfig
 from torchmetrics import MeanMetric
+from torchmetrics.classification import MultilabelAUROC, MultilabelF1Score
 
 
-class ExampleLightningModule(LightningModule):
+class ClassifierLightningModule(LightningModule):
     """
-    Example Lightning module. Replace this with your own Lightning module.
+    Net Lightning module.
     """
 
     def __init__(
         self,
         net: torch.nn.Module,
+        nb_labels:int,
         criterion: torch.nn.Module,
         optimizer: type[torch.optim.Optimizer],
         scheduler: type[torch.optim.lr_scheduler.LRScheduler] | None = None,
@@ -39,30 +41,40 @@ class ExampleLightningModule(LightningModule):
         self.train_loss = MeanMetric()
         self.valid_loss = MeanMetric()
 
+        self.nb_labels = nb_labels
+
+        # Perte
+        self.train_loss = MeanMetric()
+        self.val_loss = MeanMetric()
+
+        # F1 Macro (moyenne non pondérée sur l'ensemble des 138 odeurs)
+        self.val_f1_macro = MultilabelF1Score(
+            num_labels=self.nb_labels, average="macro"
+        )
+
+        # F1 par classe (average=None renvoie un tenseur de 138 scores)
+        self.val_f1_per_class = MultilabelF1Score(
+            num_labels=self.nb_labels, average=None
+        )
+
+        # AUROC Macro
+        self.val_auroc = MultilabelAUROC(
+            num_labels=self.nb_labels, average="macro"
+        )
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.net(inputs)
 
-    def model_step(
-        self,
-        batch: tuple[torch.Tensor, torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Perform a single model step on a batch of data.
-
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
-
-        :return: A tuple containing (in order):
-            - A tensor of losses.
-            - A tensor of predictions.
-            - A tensor of targets.
-        :rtype: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-        """
-
+    def model_step(self, batch):
         inputs, targets = batch
         logits = self.forward(inputs)
+        targets = targets.to(dtype=torch.float32)
         loss = self.criterion(logits, targets)
-        preds = torch.argmax(logits, dim=1)
-        return loss, preds, targets
+
+        probs = torch.sigmoid(logits)
+        preds = (probs > 0.5).to(dtype=torch.float32)
+
+        return loss, probs, preds, targets
 
     def training_step(
         self,
@@ -98,10 +110,34 @@ class ExampleLightningModule(LightningModule):
         :return: A tensor of losses between model predictions and targets.
         :rtype: torch.Tensor
         """
+        loss, probs, preds, targets = self.model_step(batch)
+        targets_int = targets.to(dtype=torch.long)
+        self.val_loss(loss.detach())
+        self.log(
+            "val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True
+        )
 
-        loss, _preds, _targets = self.model_step(batch)
-        self.valid_loss(loss.detach())  # Just for logging, so detach before accumulating
-        self.log("valid/loss", self.valid_loss, on_step=False, on_epoch=True, prog_bar=True)
+        # Mise à jour des métriques avec les bons formats :
+        # - F1 prend preds binaire (ou probs) et targets (int)
+        # - AUROC prend impérativement probs flottantes continues
+        self.val_f1_macro.update(preds, targets_int)
+        self.val_f1_per_class.update(preds, targets_int)
+        self.val_auroc.update(probs, targets_int)
+
+        self.log(
+            "val/f1_macro",
+            self.val_f1_macro,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/auroc_macro",
+            self.val_auroc,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
     def configure_optimizers(
         self,
