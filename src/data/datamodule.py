@@ -98,7 +98,7 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=True,
-                persistent_workers=self.persistent_workers
+                persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             )
         raise ValueError("`self.data_train` is `None`. Ensure you call `self.setup` before calling this function.")
 
@@ -110,7 +110,7 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=False,
-                persistent_workers=self.persistent_workers
+                persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             )
         raise ValueError("`self.data_valid` is `None`. Ensure you call `self.setup` before calling this function.")
 
@@ -122,6 +122,6 @@ class ExampleDataModule(LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 shuffle=False,
-                persistent_workers=self.persistent_workers
+                persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
             )
         raise ValueError("`self.data_test` is `None`. Ensure you call `self.setup` before calling this function.")

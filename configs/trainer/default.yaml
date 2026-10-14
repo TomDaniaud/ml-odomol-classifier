@@ -2,7 +2,7 @@ _target_: lightning.pytorch.trainer.Trainer
 
 default_root_dir: ${paths.output_dir}
 max_epochs: 10
-precision: 16-mixed
+precision: 32-true
 check_val_every_n_epoch: 1
 enable_model_summary: false
 

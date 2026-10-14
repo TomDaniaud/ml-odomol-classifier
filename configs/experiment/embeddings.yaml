@@ -20,4 +20,4 @@ trainer:
 
 data:
   batch_size: 64
-  num_workers: 8
+  num_workers: 0

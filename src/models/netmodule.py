@@ -19,6 +19,7 @@ class ClassifierLightningModule(LightningModule):
         criterion: torch.nn.Module,
         optimizer: type[torch.optim.Optimizer],
         scheduler: type[torch.optim.lr_scheduler.LRScheduler] | None = None,
+        compile: bool = False,
     ):
         """
         Initialise the Lightning module.
@@ -34,12 +35,10 @@ class ClassifierLightningModule(LightningModule):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "criterion"])
 
-        self.net = cast(torch.nn.Module, torch.compile(net))
+        self.net = cast(torch.nn.Module, torch.compile(net)) if compile else net
         self.optimizer_class = optimizer
         self.scheduler_class = scheduler
         self.criterion = criterion
-        self.train_loss = MeanMetric()
-        self.valid_loss = MeanMetric()
 
         self.nb_labels = nb_labels
 
