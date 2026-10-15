@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - /tags: default
+  - override /trainer: default
+  - override /model: classifier
+  - override /data: unimol
+  - override /callbacks: default
+
+rn: ""  #alias for rapid naming
+run_name: "${rn}-${now:%m-%d_%H-%M-%S}" #run name formatting
+description: "Loading unimol precomputed embdding from smiles dataset and run a classification head to label odors"
+
+seed: 64
+float32_matmul_precision: high
+
+trainer:
+  max_epochs: 300
+  gradient_clip_val: 1.0
+  precision: 32-true
+
+
+data:
+  batch_size: 64
+  persistent_workers: True
+  num_workers: 8
