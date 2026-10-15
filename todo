@@ -1,0 +1,29 @@
+## problems
+
+1 - énorme overfitting
+2 - mauvais split des données (des molécules de structure similaire sont dans le trainset et dans le valset donc aucune preuve de généralisation)
+3 - score f1 très bas
+
+## solutions
+
+1 - régularisation:
+    - increase dropout
+    - switch optimizer to AdamW
+    - increase weigth_decay
+
+2 - find a way to split it well (with RDKit probably)
+
+3 - set up all meta componnements:
+    - early stopping callback (can be useless)
+    - set up scheduler (reduceLrOnPlateau or cosinedecay)
+    - dataside: use a (im)balanced dataset instead of a weighted sum
+    - use focal loss (maybe later because advanced)
+
+    - then:
+        try some visualisation of the repartition of the predicted probabilities ouputed by the model to see its real performances
+
+## protocol
+
+each time a new solution is implemented, run a training and save it with a comment so we can asses what perfoms and why and track ours improvement
+implements ONLY one at time so we can legitimatly ablate the working feature and keep it.
+write down a shared doc where each experiment is consigned with its tensorboard logs and its best checkpoint
