@@ -8,8 +8,6 @@ net:
   out_channels: ${model.nb_labels}
   dropout: 0.2
 
-criterion:
-  _target_: torch.nn.BCEWithLogitsLoss
 
 optimizer:
   _target_: torch.optim.Adam
@@ -25,3 +23,4 @@ optimizer:
 #   patience: 10
 
 compile: false
+pos_weights_path: null #path to a weight tensor to balance the classes

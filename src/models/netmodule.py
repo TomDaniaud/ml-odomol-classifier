@@ -1,6 +1,7 @@
 from typing import cast
 
 import torch
+from pathlib import Path
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import OptimizerConfig, OptimizerLRSchedulerConfig
 from torchmetrics import MeanMetric
@@ -16,10 +17,10 @@ class ClassifierLightningModule(LightningModule):
         self,
         net: torch.nn.Module,
         nb_labels:int,
-        criterion: torch.nn.Module,
         optimizer: type[torch.optim.Optimizer],
         scheduler: type[torch.optim.lr_scheduler.LRScheduler] | None = None,
         compile: bool = False,
+        pos_weights_path: Path | str | None = None
     ):
         """
         Initialise the Lightning module.
@@ -38,9 +39,15 @@ class ClassifierLightningModule(LightningModule):
         self.net = cast(torch.nn.Module, torch.compile(net)) if compile else net
         self.optimizer_class = optimizer
         self.scheduler_class = scheduler
-        self.criterion = criterion
 
         self.nb_labels = nb_labels
+
+        if pos_weights_path is not None:
+            weights = torch.load(pos_weights_path, weights_only=True)
+            self.register_buffer("pos_weight", weights)
+            self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+        else:
+            self.criterion = torch.nn.BCEWithLogitsLoss()
 
         # Perte
         self.train_loss = MeanMetric()
@@ -53,12 +60,12 @@ class ClassifierLightningModule(LightningModule):
 
         # F1 par classe (average=None renvoie un tenseur de 138 scores)
         self.val_f1_per_class = MultilabelF1Score(
-            num_labels=self.nb_labels, average=None
+            num_labels=self.nb_labels, average=None, zero_division=0.0,
         )
 
         # AUROC Macro
         self.val_auroc = MultilabelAUROC(
-            num_labels=self.nb_labels, average="macro"
+            num_labels=self.nb_labels, average="macro", zero_division=0.0,
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:

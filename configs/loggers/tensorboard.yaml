@@ -1,5 +1,6 @@
 tensorboard:
   _target_: lightning.pytorch.loggers.TensorBoardLogger
   save_dir: ${paths.log_dir}/tensorboard
-  name: "experiment"
+  name: "embeddings"
   version: ${run_name}
+  default_hp_metric: false

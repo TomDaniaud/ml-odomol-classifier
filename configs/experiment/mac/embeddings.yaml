@@ -24,3 +24,6 @@ data:
   batch_size: 64
   persistent_workers: True
   num_workers: 8
+
+model:
+  pos_weights_path: data/pos_weights.pt
