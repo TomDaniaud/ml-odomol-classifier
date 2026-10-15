@@ -60,12 +60,12 @@ class ClassifierLightningModule(LightningModule):
 
         # F1 par classe (average=None renvoie un tenseur de 138 scores)
         self.val_f1_per_class = MultilabelF1Score(
-            num_labels=self.nb_labels, average=None, zero_division=0.0,
+            num_labels=self.nb_labels, average=None
         )
 
         # AUROC Macro
         self.val_auroc = MultilabelAUROC(
-            num_labels=self.nb_labels, average="macro", zero_division=0.0,
+            num_labels=self.nb_labels, average="macro"
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -100,6 +100,9 @@ class ClassifierLightningModule(LightningModule):
         loss, _probs, _preds, _targets = self.model_step(batch)
         self.train_loss(loss.detach())  # Just for logging, so detach before accumulating
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        
+        current_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
+        self.log("train/lr", current_lr, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(

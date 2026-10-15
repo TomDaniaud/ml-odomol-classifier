@@ -26,4 +26,4 @@
 
 each time a new solution is implemented, run a training and save it with a comment so we can asses what perfoms and why and track ours improvement
 implements ONLY one at time so we can legitimatly ablate the working feature and keep it.
-write down a shared doc where each experiment is consigned with its tensorboard logs and its best checkpoint
+write down in `experiments.md` (or a shared gdoc) where each experiment is consigned with its tensorboard logs and its best checkpoint

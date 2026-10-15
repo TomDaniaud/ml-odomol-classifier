@@ -9,6 +9,7 @@ defaults:
 
 rn: ""  #alias for rapid naming
 run_name: "${rn}-${now:%m-%d_%H-%M-%S}" #run name formatting
+subgroup: scheduler #directory to write logs
 description: "Loading unimol precomputed embdding from smiles dataset and run a classification head to label odors"
 
 seed: 64
@@ -19,7 +20,6 @@ trainer:
   gradient_clip_val: 1.0
   precision: 32-true
 
-
 data:
   batch_size: 64
   persistent_workers: True
@@ -27,3 +27,18 @@ data:
 
 model:
   pos_weights_path: data/pos_weights.pt
+
+  net:
+    dropout: 0.5
+
+  optimizer:
+    _target_: torch.optim.AdamW
+    _partial_: true
+    lr: 0.001
+    weight_decay: 0.05
+
+  scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: ${trainer.max_epochs}   # Récupère dynamiquement le max d'époques de Lightning pour simuler un cosine decay plutot
+    eta_min: 1e-6

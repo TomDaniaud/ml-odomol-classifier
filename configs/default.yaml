@@ -21,6 +21,7 @@ defaults:
 task_name: "train"
 
 run_name: null
+subgroup: null # write tensorboard logs in subgroup/run_name
 
 description: null
 
