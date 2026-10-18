@@ -27,3 +27,8 @@
 each time a new solution is implemented, run a training and save it with a comment so we can asses what perfoms and why and track ours improvement
 implements ONLY one at time so we can legitimatly ablate the working feature and keep it.
 write down in `experiments.md` (or a shared gdoc) where each experiment is consigned with its tensorboard logs and its best checkpoint
+
+## roadmap
+
+please write down here any drastic change about the pardigm of the project
+https://docs.google.com/document/d/1E10r-T8g8bQMhLHJ49XP8aWaW7mtAK6bFt-G7U04LmU/edit?usp=sharing
