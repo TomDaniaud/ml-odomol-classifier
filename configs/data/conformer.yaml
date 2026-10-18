@@ -1,0 +1,14 @@
+_target_: src.data.datamodule.OdomolDataModule
+
+data_file: ${paths.root_dir}/data/conformers_3d_dataset_100_000.pt
+batch_size: 32  # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+val_split: 0.2
+num_workers: 0
+pin_memory: False
+persistent_workers: False
+seed: ${seed}
+
+jitter_min: 0.01
+jitter_max: 0.04
+permute_atoms: True
+max_pos_weight: 20.0  #plafond de pondération

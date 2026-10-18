@@ -1,41 +1,54 @@
+from typing import Any
 import torch
 from torch import nn
-from unimol import UnimolBackbone
+from unimol_tools.models import UniMolModel
 
-from head import ClassificationHead
+from src.models.components.head import ClassificationHead
 
 
-class OdomolNet(nn.Module):
+class OdomolFineTuneNet(nn.Module):
     """
-    A network that run classification trough unimol embedding (backbone) then run the classifications layer (head).
+    Architecture complète permettant le fine-tuning du Graph Transformer Uni-Mol
+    avec propagation des gradients de bout en bout.
     """
 
-    def __init__(self, hidden_channels:int, nb_labels:int, dropout:int):
-        """
-        Initialize the model.
-        """
-
+    def __init__(
+        self,
+        in_channels: int = 512,
+        hidden_channels: int = 256,
+        out_channels: int = 138,
+        dropout: float = 0.4,
+        unfreeze_last_n_layers: int = 0,    #gel complet par défault
+    ):
         super().__init__()
+        self.backbone = UniMolModel(output_dim=1, data_type="molecule", remove_hs=False)
 
-        self.unimol = UnimolBackbone(
-            ...
-        )
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        if unfreeze_last_n_layers > 0:
+            for layer in self.backbone.encoder.layers[-unfreeze_last_n_layers:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+
         self.head = ClassificationHead(
-            ...,        #in_channels = unimol out channels
-            hidden_channels,
-            nb_labels,
-            dropout,
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            dropout=dropout,
         )
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, batched_tensors: dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        Perform a single forward pass through the network.
-
-        :param inputs: The input tensor.
-        :type inputs: torch.Tensor
-        :return: The output tensor.
-        :rtype: torch.Tensor
+        Ici batched_tensors contient directement les tenseurs PyTorch :
+        src_tokens, src_distance, src_coord, src_edge_type
         """
+        cls_repr = self.backbone(
+            src_tokens=batched_tensors["src_tokens"],
+            src_distance=batched_tensors["src_distance"],
+            src_coord=batched_tensors["src_coord"],
+            src_edge_type=batched_tensors["src_edge_type"],
+            return_repr=True,
+        )
 
-        embeddings = self.unimol(inputs)
-        return self.head(embeddings)
+        return self.head(cls_repr)

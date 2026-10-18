@@ -16,4 +16,3 @@ optimizer:
   weight_decay: 0.0
 
 compile: false
-pos_weights_path: null #path to a weighted tensor to balance the classes

@@ -3,8 +3,8 @@
 defaults:
   - /tags: default
   - override /trainer: default
-  - override /model: classifier
-  - override /data: unimol
+  - override /model: odomol
+  - override /data: conformer
   - override /callbacks: default
 
 rn: ""  #alias for rapid naming
@@ -26,8 +26,6 @@ data:
   num_workers: 8
 
 model:
-  pos_weights_path: data/pos_weights.pt
-
   net:
     dropout: 0.5
 

@@ -20,7 +20,7 @@ class ClassifierLightningModule(LightningModule):
         optimizer: type[torch.optim.Optimizer],
         scheduler: type[torch.optim.lr_scheduler.LRScheduler] | None = None,
         compile: bool = False,
-        pos_weights_path: Path | str | None = None
+        use_pos_weights: bool = True,
     ):
         """
         Initialise the Lightning module.
@@ -41,13 +41,8 @@ class ClassifierLightningModule(LightningModule):
         self.scheduler_class = scheduler
 
         self.nb_labels = nb_labels
-
-        if pos_weights_path is not None:
-            weights = torch.load(pos_weights_path, weights_only=True)
-            self.register_buffer("pos_weight", weights)
-            self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
-        else:
-            self.criterion = torch.nn.BCEWithLogitsLoss()
+        self.criterion = torch.nn.BCEWithLogitsLoss() # surchargé dans on_fit_start()
+        self.use_pos_weights = use_pos_weights
 
         # Perte
         self.train_loss = MeanMetric()
@@ -67,6 +62,18 @@ class ClassifierLightningModule(LightningModule):
         self.val_auroc = MultilabelAUROC(
             num_labels=self.nb_labels, average="macro"
         )
+
+    def on_fit_start(self) -> None:
+        """
+        Appelé automatiquement par Lightning juste après datamodule.setup()
+        et après que le modèle a été envoyé sur le bon device (GPU/MPS/CPU).
+        """
+        dm = getattr(self.trainer, "datamodule", None)
+        if self.use_pos_weights and dm is not None and getattr(dm, "pos_weights", None) is not None:
+            # On transfère le tenseur de poids sur le même device que le modèle (ex: cuda:0 ou mps)
+            weights = dm.pos_weights.to(device=self.device, dtype=torch.float32)
+            self.register_buffer("pos_weight", weights)
+            self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.net(inputs)

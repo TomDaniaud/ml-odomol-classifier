@@ -1,0 +1,19 @@
+_target_: src.models.netmodule.ClassifierLightningModule
+nb_labels: 138
+
+net:
+  _target_: src.models.components.odomol.OdomolFineTuneNet
+  in_channels: 512
+  hidden_channels: 256
+  out_channels: ${model.nb_labels}
+  dropout: 0.2
+  unfreeze_last_n_layers: 0   #defreeze backbone for finetunning
+
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+compile: false
