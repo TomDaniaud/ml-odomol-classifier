@@ -35,6 +35,16 @@ comments: overfitting trigger to much the patience of the plateau scheduler, swi
 ckpt: -
 log: logs/tensorboard/scheduler/cosine-decay-10-15_14-33-39
 
+8 - data augmentation (=> 8 batch size + workers=0 + 50epch)
+comments: overfitting is completly gone, auroc is way better and growing steadly (ATH 0.85), f1 is way lower but still learning (0.21)
+ckpt: -
+log: logs/tensorboard/augmentation/test8batchsize-10-18_18-00-18
+
+9 - optimal threshold (virtual batch size of 64 (using acc grad) so aligned with prev training)
+comments: 
+ckpt: -
+log: logs/tensorboard/augmentation/8x8bs-threshold-dyn-10-19_08-50-31
+
 
 X - 
 comments:

@@ -44,6 +44,10 @@ class ClassifierLightningModule(LightningModule):
         self.criterion = torch.nn.BCEWithLogitsLoss() # surchargé dans on_fit_start()
         self.use_pos_weights = use_pos_weights
 
+        self.threshold = 0.5
+        self.val_probs_list: list[torch.Tensor] = []
+        self.val_targets_list: list[torch.Tensor] = []
+
         # Perte
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -85,7 +89,7 @@ class ClassifierLightningModule(LightningModule):
         loss = self.criterion(logits, targets)
 
         probs = torch.sigmoid(logits)
-        preds = (probs > 0.5).to(dtype=torch.float32)
+        preds = (probs > self.threshold).to(dtype=torch.float32)
 
         return loss, probs, preds, targets
 
@@ -140,6 +144,9 @@ class ClassifierLightningModule(LightningModule):
         self.val_f1_per_class.update(preds, targets_int)
         self.val_auroc.update(probs, targets_int)
 
+        self.val_probs_list.append(probs.detach().cpu())
+        self.val_targets_list.append(targets.detach().cpu())
+
         self.log(
             "valid/f1_macro",
             self.val_f1_macro,
@@ -154,6 +161,37 @@ class ClassifierLightningModule(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+
+    def on_validation_epoch_end(self) -> None:
+        if not self.val_probs_list:
+            return
+
+        all_probs = torch.cat(self.val_probs_list, dim=0)
+        all_targets = torch.cat(self.val_targets_list, dim=0)
+
+        self.val_probs_list.clear()
+        self.val_targets_list.clear()
+
+        thresholds = torch.linspace(0.05, 0.95, steps=19).view(-1, 1, 1)
+
+        preds_bin = (all_probs.unsqueeze(0) >= thresholds).to(torch.float32)
+        targets_exp = all_targets.unsqueeze(0)
+
+        tp = (preds_bin * targets_exp).sum(dim=1)
+        fp = (preds_bin * (1.0 - targets_exp)).sum(dim=1)
+        fn = ((1.0 - preds_bin) * targets_exp).sum(dim=1)
+
+        # Calcul du F1 par classe puis moyenne Macro par seuil : Shape (19,)
+        denom = 2.0 * tp + fp + fn
+        f1_per_class = torch.where(denom > 0, (2.0 * tp) / denom, torch.zeros_like(denom))
+        macro_f1_per_thresh = f1_per_class.mean(dim=1)
+
+        best_idx = int(torch.argmax(macro_f1_per_thresh).item())
+        best_f1 = macro_f1_per_thresh[best_idx].item()
+        best_thresh = thresholds.view(-1)[best_idx].item()
+
+        self.log("valid/f1_opt_global", best_f1, prog_bar=True)
+        self.log("valid/best_threshold", best_thresh, prog_bar=False)
 
     def configure_optimizers(
         self,
