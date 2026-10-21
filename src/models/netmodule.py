@@ -196,7 +196,17 @@ class ClassifierLightningModule(LightningModule):
     def configure_optimizers(
         self,
     ) -> OptimizerConfig | OptimizerLRSchedulerConfig:
-        optimizer = self.optimizer_class(params=self.net.parameters())  # ty:ignore[missing-argument]
+        trainable_params = [p for p in self.net.parameters() if p.requires_grad]
+        opt_kwargs = {}
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            # Sur GPU Intel Arc / Level-Zero sous Windows, l'implémentation multi-tenseurs
+            # (_multi_tensor_adam, foreach=True) provoque un crash lors de `torch._foreach_sqrt`
+            # (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, erreur 39). On force l'exécution unitaire (foreach=False).
+            opt_kwargs["foreach"] = False
+        try:
+            optimizer = self.optimizer_class(params=trainable_params, **opt_kwargs)  # ty:ignore[missing-argument]
+        except TypeError:
+            optimizer = self.optimizer_class(params=trainable_params)  # ty:ignore[missing-argument]
         if self.scheduler_class is not None:
             scheduler = self.scheduler_class(optimizer=optimizer)
             return {

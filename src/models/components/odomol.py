@@ -21,6 +21,7 @@ class OdomolFineTuneNet(nn.Module):
         unfreeze_last_n_layers: int = 0,    #gel complet par défault
     ):
         super().__init__()
+        self.unfreeze_last_n_layers = unfreeze_last_n_layers
         self.backbone = UniMolModel(output_dim=1, data_type="molecule", remove_hs=False)
 
         for param in self.backbone.parameters():

@@ -1,6 +1,20 @@
 import logging
 import os
+import sys
 from pathlib import Path
+
+# Configuration bas niveau de l'allocateur mémoire Intel oneAPI Level-Zero / XPU :
+# - UR_L0_ENABLE_RELAXED_ALLOCATION_LIMITS : lève la limite heuristique de 4 Go par allocation contiguë.
+# - PYTORCH_XPU_ALLOC_CONF : limite le découpage des segments pour prévenir la fragmentation mémoire.
+os.environ.setdefault("UR_L0_ENABLE_RELAXED_ALLOCATION_LIMITS", "1")
+os.environ.setdefault("PYTORCH_XPU_ALLOC_CONF", "max_split_size_mb:256")
+
+# Fix Windows console encoding for Unicode/emojis (prevents UnicodeEncodeError cp1252)
+if sys.platform == "win32":
+    if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
 
 import hydra
 import rootutils
@@ -10,6 +24,7 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer, s
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
+from utils.hardware import get_hardware_strategy
 from utils.resolvers import register_resolvers
 
 # Log full error tracebacks
@@ -28,6 +43,13 @@ register_resolvers()
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default.yaml")
 def main(cfg: DictConfig):
+    for handler in logging.root.handlers:
+        if hasattr(handler, "stream") and hasattr(handler.stream, "reconfigure"):
+            try:
+                handler.stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
     log.info("Starting a new training job.")
     log.info(f":card_index: {'[bold green]Job Name:[/]':<35}{cfg.run_name}")
     log.info(f":page_facing_up: {'[bold green]Description:[/]':<35}{cfg.description}")
@@ -70,13 +92,20 @@ def main(cfg: DictConfig):
     else:
         log.warning("No loggers found in config.")
 
+    # Detect hardware strategy (e.g. Intel Arc XPU, CUDA, MPS)
+    strategy = get_hardware_strategy(cfg.trainer)
+    trainer_kwargs = {"callbacks": callbacks, "logger": loggers}
+    if strategy is not None:
+        trainer_kwargs["strategy"] = strategy
+
     # Instantiate trainer and start training
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=loggers)
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, **trainer_kwargs)
     trainer.fit(
         model=model,
         datamodule=datamodule,
         ckpt_path=cfg.get("ckpt_path"),
     )
+
 
 
 if __name__ == "__main__":
