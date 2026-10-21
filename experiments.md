@@ -45,6 +45,20 @@ comments:
 ckpt: -
 log: logs/tensorboard/augmentation/8x8bs-threshold-dyn-10-19_08-50-31
 
+10 - Optimization of the separation of 3D structures between train and val
+comments: supposed to decrease data leak, but same f1 (0.207)
+ckpt: -
+log: logs/tensorboard/scaffold/random-scaffold-split-10-20_20-58-37
+
+11 - no dyn_augmentation
+comments: better f1, dynamic augmentation is superflue, we suppose that learning rate is descending too fast. f1(0.23)
+ckpt: -
+log: logs/tensorboard/augmentation/no-dyn-augm-10-21_14-38-21
+
+12 - no scheduler
+comments: same f1
+ckpt: -
+log: logs/tensorboard/scheduler/no-scheduler-10-21_14-59-44
 
 X - 
 comments:
