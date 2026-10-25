@@ -24,7 +24,8 @@ trainer:
 data:
   batch_size: 8
   persistent_workers: True
-  num_workers: 0
+  num_workers: 1
+  dyn_augmentation: false
 
 model:
   net:
