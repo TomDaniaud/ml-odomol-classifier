@@ -7,6 +7,7 @@ from lightning.pytorch.utilities.types import OptimizerConfig, OptimizerLRSchedu
 from torchmetrics import MeanMetric
 from torchmetrics.classification import MultilabelAUROC, MultilabelF1Score
 
+from src.models.losses import AsymmetricLoss
 from src.models.metrics import OptimalMultiLabelF1
 
 
@@ -32,7 +33,8 @@ class ClassifierLightningModule(LightningModule):
         self.scheduler_class = scheduler
 
         self.nb_labels = nb_labels
-        self.criterion = torch.nn.BCEWithLogitsLoss()  # Surchargé dans on_fit_start()
+        # self.criterion = torch.nn.BCEWithLogitsLoss()  # Surchargé dans on_fit_start()
+        self.criterion = AsymmetricLoss()
         self.use_pos_weights = use_pos_weights
         self.threshold = threshold
 
@@ -53,13 +55,13 @@ class ClassifierLightningModule(LightningModule):
         # Métrique personnalisée conjointe (Macro + Micro optimaux)
         self.val_optimal_f1 = OptimalMultiLabelF1(num_thresholds=19)
 
-    def on_fit_start(self) -> None:
-        """Récupère et applique les poids de déséquilibre de classes depuis le DataModule."""
-        dm = getattr(self.trainer, "datamodule", None)
-        if self.use_pos_weights and dm is not None and getattr(dm, "pos_weights", None) is not None:
-            weights = dm.pos_weights.to(device=self.device, dtype=torch.float32)
-            self.register_buffer("pos_weight", weights)
-            self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+    # def on_fit_start(self) -> None:
+    #     """Récupère et applique les poids de déséquilibre de classes depuis le DataModule."""
+    #     dm = getattr(self.trainer, "datamodule", None)
+    #     if self.use_pos_weights and dm is not None and getattr(dm, "pos_weights", None) is not None:
+    #         weights = dm.pos_weights.to(device=self.device, dtype=torch.float32)
+    #         self.register_buffer("pos_weight", weights)
+    #         self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
 
     def forward(self, inputs: dict[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         return self.net(inputs)

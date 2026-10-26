@@ -45,6 +45,20 @@ comments:
 ckpt: -
 log: logs/tensorboard/augmentation/8x8bs-threshold-dyn-10-19_08-50-31
 
+10 - dynamic augmentation off (FLO COMPLETE ICIIIIIIII)
+comments:
+ckpt: -
+log:
+
+11 - switching to asymetric loss to emphasis on hard example (dyn aug off & new metrics: f1_micro)
+comments: best auroc by far, f1 really good (0.25), the training is not fully converged and can be resumed
+ckpt: outputs/2026-10-25/22-54-29/checkpoints/last.ckpt
+log: logs/tensorboard/losses/asl+f1_micro+300epch-10-25_22-54-29
+
+12 - running 11 for a longer time / reduce the scheduler impact or delete it
+comments:
+ckpt: -
+log:
 
 X - 
 comments:

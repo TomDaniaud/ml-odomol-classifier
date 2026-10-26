@@ -45,7 +45,7 @@ class OptimalMultiLabelF1(Metric):
         all_targets = torch.cat(self.targets_list, dim=0)
 
         # Broadcasting sur les seuils : (K, N, 138)
-        thresh_grid = self.thresholds.view(-1, 1, 1)
+        thresh_grid = self.thresholds.to(device=all_probs.device).view(-1, 1, 1)
         preds_bin = (all_probs.unsqueeze(0) >= thresh_grid).to(torch.float32)
         targets_exp = all_targets.unsqueeze(0)
 

@@ -27,6 +27,7 @@ class OdomolDataModule(LightningDataModule):
         jitter_max: float = 0.04,
         permute_atoms: bool = True,
         max_pos_weight: float = 20.0,  # Plafond anti-overfitting
+        dynamic_augmentation: bool = True
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -98,6 +99,7 @@ class OdomolDataModule(LightningDataModule):
             jitter_min=self.hparams.jitter_min,
             jitter_max=self.hparams.jitter_max,
             permute_atoms=self.hparams.permute_atoms,
+            dynamic_augmentation=self.hparams.dynamic_augmentation,
         )
 
         self.data_val = Conformer3DDataset(

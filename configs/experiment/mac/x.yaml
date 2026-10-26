@@ -9,14 +9,14 @@ defaults:
 
 rn: ""  #alias for rapid naming
 run_name: "${rn}-${now:%m-%d_%H-%M-%S}" #run name formatting
-subgroup: augmentation  #directory to write logs
+subgroup: losses  #directory to write logs
 description: "Loading unimol precomputed embdding from smiles dataset and run a classification head to label odors"
 
 seed: 64
 float32_matmul_precision: high
 
 trainer:
-  max_epochs: 50
+  max_epochs: 300
   accumulate_grad_batches: 8
   gradient_clip_val: 1.0
   precision: 32-true
@@ -25,7 +25,7 @@ data:
   batch_size: 8
   persistent_workers: True
   num_workers: 1
-  dyn_augmentation: false
+  dynamic_augmentation: false
 
 model:
   net:
