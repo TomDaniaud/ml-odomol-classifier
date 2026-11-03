@@ -1,0 +1,44 @@
+# @package _global_
+
+defaults:
+  - /tags: default
+  - override /trainer: default
+  - override /model: odomol
+  - override /data: conformer
+  - override /callbacks: default
+
+rn: "focal-loss-1000ep"
+run_name: "${rn}-${now:%m-%d_%H-%M-%S}"
+subgroup: losses
+description: "Focal loss (Asymmetric Loss) sur 1000 époques avec dynamic_augmentation=false"
+
+seed: 64
+float32_matmul_precision: high
+
+trainer:
+  max_epochs: 1000
+  accumulate_grad_batches: 8
+  gradient_clip_val: 1.0
+  precision: 32-true
+
+data:
+  batch_size: 8
+  persistent_workers: True
+  num_workers: 0
+  dynamic_augmentation: false
+
+model:
+  net:
+    dropout: 0.4
+
+  optimizer:
+    _target_: torch.optim.AdamW
+    _partial_: true
+    lr: 0.001
+    weight_decay: 0.05
+
+  scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: ${trainer.max_epochs}
+    eta_min: 1e-6

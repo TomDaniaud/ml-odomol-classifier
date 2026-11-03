@@ -13,3 +13,4 @@ jitter_min: 0.01
 jitter_max: 0.04
 permute_atoms: True
 max_pos_weight: 20.0  #plafond de pondération
+dynamic_augmentation: true

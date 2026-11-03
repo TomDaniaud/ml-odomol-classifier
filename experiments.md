@@ -65,6 +65,16 @@ comments: test de 3 couches de MLP dans le décodeur après Uni-Mol avec régula
 ckpt: -
 log: logs/tensorboard/decoder/mlp-3layers-10-21_22-03-49
 
+14 - switching to asymetric loss / focal loss to emphasis on hard example (dyn aug off & new metrics: f1_micro)
+comments: best auroc by far, f1 really good (0.25), the training is not fully converged and can be resumed
+ckpt: outputs/2026-10-25/22-54-29/checkpoints/last.ckpt
+log: logs/tensorboard/losses/asl+f1_micro+300epch-10-25_22-54-29
+
+15 - running focal loss on 1000 epochs
+comments: 
+ckpt: -
+log: 
+
 X - 
 comments:
 ckpt: -
