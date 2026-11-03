@@ -1,4 +1,5 @@
-from typing import Any
+from collections.abc import Sequence
+
 import torch
 from torch import nn
 from unimol_tools.models import UniMolModel
@@ -15,10 +16,11 @@ class OdomolFineTuneNet(nn.Module):
     def __init__(
         self,
         in_channels: int = 512,
-        hidden_channels: int = 256,
+        hidden_channels: int | Sequence[int] = 256,
         out_channels: int = 138,
         dropout: float = 0.4,
-        unfreeze_last_n_layers: int = 0,    #gel complet par défault
+        unfreeze_last_n_layers: int = 0,  # gel complet par défault
+        num_layers: int = 2,
     ):
         super().__init__()
         self.unfreeze_last_n_layers = unfreeze_last_n_layers
@@ -37,6 +39,7 @@ class OdomolFineTuneNet(nn.Module):
             hidden_channels=hidden_channels,
             out_channels=out_channels,
             dropout=dropout,
+            num_layers=num_layers,
         )
 
     def forward(self, batched_tensors: dict[str, torch.Tensor]) -> torch.Tensor:

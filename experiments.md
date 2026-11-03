@@ -60,6 +60,11 @@ comments: same f1
 ckpt: -
 log: logs/tensorboard/scheduler/no-scheduler-10-21_14-59-44
 
+13 - 3-layer MLP decoder (512 -> 256 -> 128 -> 138)
+comments: test de 3 couches de MLP dans le décodeur après Uni-Mol avec régularisation, n'améliore pas le f1 (0.225)
+ckpt: -
+log: logs/tensorboard/decoder/mlp-3layers-10-21_22-03-49
+
 X - 
 comments:
 ckpt: -

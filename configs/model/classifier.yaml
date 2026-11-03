@@ -7,6 +7,7 @@ net:
   hidden_channels: 256
   out_channels: ${model.nb_labels}
   dropout: 0.2
+  num_layers: 2
 
 
 optimizer:
