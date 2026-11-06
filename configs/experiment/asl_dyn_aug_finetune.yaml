@@ -1,0 +1,57 @@
+# @package _global_
+
+defaults:
+  - /tags: default
+  - override /trainer: default
+  - override /model: odomol
+  - override /data: conformer
+  - override /callbacks: default
+
+rn: "asl-dyn-aug-finetune"
+run_name: "${rn}-${now:%m-%d_%H-%M-%S}"
+subgroup: augmentation
+description: "Uni-Mol corrigé avec dynamic_augmentation=true, dégel des 2 dernières couches (backbone_lr=1e-4) et CosineAnnealing sur 120 époques"
+
+seed: 64
+float32_matmul_precision: high
+
+trainer:
+  max_epochs: 120
+  accumulate_grad_batches: 8
+  gradient_clip_val: 1.0
+  precision: 32-true
+
+data:
+  batch_size: 8
+  persistent_workers: True
+  num_workers: 0
+  dynamic_augmentation: true
+  permute_atoms: false  # Uni-Mol est mathématiquement invariant par permutation des atomes
+  jitter_min: 0.01
+  jitter_max: 0.04
+
+model:
+  backbone_lr: 1e-4
+
+  net:
+    dropout: 0.4
+    unfreeze_last_n_layers: 2
+
+  criterion:
+    _target_: src.models.losses.AsymmetricLoss
+    gamma_neg: 2.0
+    gamma_pos: 0.0
+    clip: 0.05
+
+  optimizer:
+    _target_: torch.optim.AdamW
+    _partial_: true
+    lr: 0.001
+    weight_decay: 0.05
+
+  scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: ${trainer.max_epochs}
+    eta_min: 1e-6
+
