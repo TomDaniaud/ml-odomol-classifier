@@ -10,8 +10,8 @@ class AsymmetricLoss(nn.Module):
 
     def __init__(
         self,
-        gamma_neg: float = 4.0,
-        gamma_pos: float = 1.0,
+        gamma_neg: float = 2.0,
+        gamma_pos: float = 0.0,
         clip: float = 0.05,
         eps: float = 1e-8,
         disable_torch_grad_focal_loss: bool = True, #evite de paratiter le calcul du gradient

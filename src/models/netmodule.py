@@ -23,6 +23,7 @@ class ClassifierLightningModule(LightningModule):
         use_pos_weights: bool = True,
         threshold: float = 0.5,
         criterion: torch.nn.Module | None = None,
+        backbone_lr: float = 1e-4,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "criterion"])
@@ -30,6 +31,7 @@ class ClassifierLightningModule(LightningModule):
         self.net = cast(torch.nn.Module, torch.compile(net)) if compile else net
         self.optimizer_class = optimizer
         self.scheduler_class = scheduler
+        self.backbone_lr = backbone_lr
 
         self.nb_labels = nb_labels
         self.criterion = criterion if criterion is not None else AsymmetricLoss()
@@ -105,6 +107,7 @@ class ClassifierLightningModule(LightningModule):
 
         self.log("valid/f1_opt_macro", metrics["f1_macro_opt"], prog_bar=True)
         self.log("valid/best_thresh_macro", metrics["thresh_macro"], prog_bar=False)
+        self.log("valid/f1_opt_per_class_macro", metrics["f1_macro_per_class_opt"], prog_bar=True)
         self.log("valid/f1_opt_micro", metrics["f1_micro_opt"], prog_bar=True)
         self.log("valid/best_thresh_micro", metrics["thresh_micro"], prog_bar=False)
 
@@ -114,7 +117,21 @@ class ClassifierLightningModule(LightningModule):
     def configure_optimizers(
         self,
     ) -> OptimizerConfig | OptimizerLRSchedulerConfig:
-        trainable_params = [p for p in self.net.parameters() if p.requires_grad]
+        backbone_mod = getattr(self.net, "backbone", None)
+        head_mod = getattr(self.net, "head", None)
+        if backbone_mod is not None and head_mod is not None:
+            backbone_params = [p for p in backbone_mod.parameters() if p.requires_grad]
+            head_params = [p for p in head_mod.parameters() if p.requires_grad]
+            if backbone_params:
+                param_groups: list = [
+                    {"params": head_params},
+                    {"params": backbone_params, "lr": self.backbone_lr},
+                ]
+            else:
+                param_groups = head_params
+        else:
+            param_groups = [p for p in self.net.parameters() if p.requires_grad]
+
         opt_kwargs = {}
         if hasattr(torch, "xpu") and torch.xpu.is_available():
             # Sur GPU Intel Arc / Level-Zero sous Windows, l'implémentation multi-tenseurs
@@ -122,9 +139,9 @@ class ClassifierLightningModule(LightningModule):
             # (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, erreur 39). On force l'exécution unitaire (foreach=False).
             opt_kwargs["foreach"] = False
         try:
-            optimizer = self.optimizer_class(params=trainable_params, **opt_kwargs)  # ty:ignore[missing-argument]
+            optimizer = self.optimizer_class(params=param_groups, **opt_kwargs)  # ty:ignore[missing-argument]
         except TypeError:
-            optimizer = self.optimizer_class(params=trainable_params)  # ty:ignore[missing-argument]
+            optimizer = self.optimizer_class(params=param_groups)  # ty:ignore[missing-argument]
         if self.scheduler_class is not None:
             scheduler = self.scheduler_class(optimizer=optimizer)
             return {
