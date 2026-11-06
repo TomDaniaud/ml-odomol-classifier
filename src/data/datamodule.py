@@ -1,17 +1,18 @@
 import logging
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 from typing import Any
+
 import numpy as np
 import torch
-from functools import partial
-from lightning import LightningDataModule
-from torch.utils.data import DataLoader
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+from lightning import LightningDataModule
 from rdkit import Chem
 from rdkit.Chem.Scaffolds import MurckoScaffold
-from unimol_tools.data import Dictionary
+from torch.utils.data import DataLoader
 from unimol_tools.config import MODEL_CONFIG
+from unimol_tools.data import Dictionary
 from unimol_tools.weights import get_weight_dir, weight_download
 
 from src.data.components.conformer_dataset import Conformer3DDataset, unimol_tensor_collate_fn
@@ -114,6 +115,7 @@ class OdomolDataModule(LightningDataModule):
             weight_download(dict_name, weight_dir)
         with dict_path.open("r", encoding="utf-8") as dictionary_file:
             self.dictionary = Dictionary.load(dictionary_file)
+        self.dictionary.add_symbol("[MASK]", is_special=True)
         self.pad_idx = self.dictionary.pad()
 
         # 1. Chargement unique du fichier .pt en mémoire CPU

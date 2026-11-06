@@ -1,5 +1,6 @@
 import torch
 
+
 def mol_to_unimol_tensors(
     atom_symbols: list[str],
     coords: torch.Tensor,
@@ -34,9 +35,8 @@ def mol_to_unimol_tensors(
     zero_coord = torch.zeros((1, 3), dtype=torch.float32)
     src_coord = torch.cat([zero_coord, coords, zero_coord], dim=0)
 
-    # 5. Matrice de distances 3D
-    src_distance = torch.zeros((len(src_tokens), len(src_tokens)), dtype=torch.float32)
-    src_distance[1:-1, 1:-1] = torch.cdist(coords, coords, p=2.0)
+    # 5. Matrice de distances 3D (incluant les distances de [CLS]/[SEP] à l'origine (0,0,0))
+    src_distance = torch.cdist(src_coord, src_coord, p=2.0)
 
     # 6. Types d'arêtes
     src_edge_type = src_tokens.view(-1, 1) * vocab_size + src_tokens.view(1, -1)

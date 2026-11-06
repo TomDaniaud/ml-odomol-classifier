@@ -63,8 +63,10 @@ class Conformer3DDataset(Dataset):
         labels: torch.Tensor = mol_data["labels"].to(dtype=torch.float32)
 
         if self.is_train:
-            # 1. Tirage aléatoire d'un conformère parmi les ~20 disponibles
-            conf_idx = torch.randint(0, len(conformers), (1,)).item()
+            # 1. Tirage aléatoire d'un conformère parmi les conformères optimisés MMFF94
+            # (le premier quart de la liste correspond aux géométries ETKDG brutes non relaxées)
+            start_idx = len(conformers) // 4 if len(conformers) >= 4 else 0
+            conf_idx = torch.randint(start_idx, len(conformers), (1,)).item()
             coords = conformers[conf_idx].clone()
 
             # 2. Permutation de l'ordre des atomes (équivalent SMILES randomization)
