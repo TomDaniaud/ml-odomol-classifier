@@ -26,11 +26,7 @@ class Conformer3DDataset(Dataset):
         jitter_max: float = 0.04,
         permute_atoms: bool = True,
         max_atoms: int = 256,
-<<<<<<< HEAD
-        dynamic_augmentation: bool = True
-=======
-        dyn_augmentation: bool = True,
->>>>>>> remotes/origin/v-gpu
+        dynamic_augmentation: bool = True,
     ):
         """
         :param data_file: Chemin vers conformers_3d_dataset.pt.
@@ -39,6 +35,7 @@ class Conformer3DDataset(Dataset):
         :param jitter_min: Écart-type minimal du bruit gaussien 3D (en Angstroms).
         :param jitter_max: Écart-type maximal du bruit gaussien 3D (en Angstroms).
         :param permute_atoms: Si True, mélange l'ordre des atomes en entraînement.
+        :param dynamic_augmentation: Active ou désactive les augmentations stochastiques d'entraînement.
         """
         super().__init__()
         self.molecules = molecules
@@ -49,11 +46,7 @@ class Conformer3DDataset(Dataset):
         self.jitter_max = jitter_max
         self.permute_atoms = permute_atoms
         self.max_atoms = max_atoms
-<<<<<<< HEAD
         self.dynamic_augmentation = dynamic_augmentation
-=======
-        self.dyn_augmentation = dyn_augmentation
->>>>>>> remotes/origin/v-gpu
 
     def __len__(self) -> int:
         return len(self.molecules)
@@ -70,40 +63,35 @@ class Conformer3DDataset(Dataset):
         labels: torch.Tensor = mol_data["labels"].to(dtype=torch.float32)
 
         if self.is_train:
-            # 1. Tirage aléatoire d'un conformère parmi les ~20 disponibles
-            conf_idx = torch.randint(0, len(conformers), (1,)).item()
+            # 1. Tirage aléatoire d'un conformère parmi les conformères optimisés MMFF94
+            # (le premier quart de la liste correspond aux géométries ETKDG brutes non relaxées)
+            start_idx = len(conformers) // 4 if len(conformers) >= 4 else 0
+            conf_idx = torch.randint(start_idx, len(conformers), (1,)).item()
             coords = conformers[conf_idx].clone()
 
             # 2. Permutation de l'ordre des atomes (équivalent SMILES randomization)
-<<<<<<< HEAD
             if self.permute_atoms and self.dynamic_augmentation:
-=======
-            if self.permute_atoms and self.dyn_augmentation:
->>>>>>> remotes/origin/v-gpu
                 perm = torch.randperm(coords.size(0))
                 coords = coords[perm]
                 atomic_numbers = atomic_numbers[perm]
                 atom_symbols = [atom_symbols[i] for i in perm.tolist()]
 
             # 3. Jittering 3D : ajout de bruit gaussien continu sur (x, y, z)
-<<<<<<< HEAD
             if self.jitter_max > 0.0 and self.dynamic_augmentation:
-=======
-            if self.jitter_max > 0.0 and self.dyn_augmentation:
->>>>>>> remotes/origin/v-gpu
                 std = torch.empty(1).uniform_(self.jitter_min, self.jitter_max).item()
                 coords = coords + torch.randn_like(coords) * std
         else:
             # validation : deterministe
             coords = conformers[-1].clone()
 
-        mol_tensors = mol_to_unimol_tensors(  #formatte les molécuels augmentées au format unimol
+        mol_tensors = mol_to_unimol_tensors(  # formatte les molécules augmentées au format unimol
             atom_symbols=atom_symbols,
             coords=coords,
             dictionary=self.dictionary,
-            max_atoms=self.max_atoms
+            max_atoms=self.max_atoms,
         )
         return mol_tensors, labels
+
 
 def unimol_tensor_collate_fn(
     batch: list[tuple[dict[str, torch.Tensor], torch.Tensor]],

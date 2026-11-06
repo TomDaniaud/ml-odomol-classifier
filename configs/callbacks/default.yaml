@@ -7,8 +7,8 @@ defaults:
 model_checkpoint:
   dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
-  monitor: "valid/loss"
-  mode: "min"
+  monitor: "valid/f1_opt_macro"
+  mode: "max"
   save_last: True
   auto_insert_metric_name: False
 

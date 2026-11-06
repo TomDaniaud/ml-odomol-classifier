@@ -37,6 +37,7 @@ class OptimalMultiLabelF1(Metric):
             return {
                 "f1_macro_opt": zero,
                 "thresh_macro": mid,
+                "f1_macro_per_class_opt": zero,
                 "f1_micro_opt": zero,
                 "thresh_micro": mid,
             }
@@ -63,6 +64,7 @@ class OptimalMultiLabelF1(Metric):
         )
         macro_f1_scores = f1_per_class.mean(dim=1)  # (K,)
         best_macro_idx = torch.argmax(macro_f1_scores)
+        f1_macro_per_class_opt = f1_per_class.max(dim=0).values.mean()
 
         # --- B. F1-Micro (somme des TP/FP/FN sur les 138 classes) ---
         tp_micro = tp_class.sum(dim=1)  # (K,)
@@ -80,6 +82,7 @@ class OptimalMultiLabelF1(Metric):
         return {
             "f1_macro_opt": macro_f1_scores[best_macro_idx],
             "thresh_macro": self.thresholds[best_macro_idx],
+            "f1_macro_per_class_opt": f1_macro_per_class_opt,
             "f1_micro_opt": micro_f1_scores[best_micro_idx],
             "thresh_micro": self.thresholds[best_micro_idx],
         }

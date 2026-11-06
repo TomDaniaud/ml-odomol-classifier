@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import cast
 
 import torch
@@ -9,7 +8,6 @@ from torchmetrics.classification import MultilabelAUROC, MultilabelF1Score
 
 from src.models.losses import AsymmetricLoss
 from src.models.metrics import OptimalMultiLabelF1
-
 
 
 class ClassifierLightningModule(LightningModule):
@@ -24,6 +22,8 @@ class ClassifierLightningModule(LightningModule):
         compile: bool = False,
         use_pos_weights: bool = True,
         threshold: float = 0.5,
+        criterion: torch.nn.Module | None = None,
+        backbone_lr: float = 1e-4,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "criterion"])
@@ -31,10 +31,10 @@ class ClassifierLightningModule(LightningModule):
         self.net = cast(torch.nn.Module, torch.compile(net)) if compile else net
         self.optimizer_class = optimizer
         self.scheduler_class = scheduler
+        self.backbone_lr = backbone_lr
 
         self.nb_labels = nb_labels
-        # self.criterion = torch.nn.BCEWithLogitsLoss()  # Surchargé dans on_fit_start()
-        self.criterion = AsymmetricLoss()
+        self.criterion = criterion if criterion is not None else AsymmetricLoss()
         self.use_pos_weights = use_pos_weights
         self.threshold = threshold
 
@@ -45,9 +45,6 @@ class ClassifierLightningModule(LightningModule):
         self.val_f1_macro = MultilabelF1Score(
             num_labels=self.nb_labels, average="macro", threshold=self.threshold
         )
-        # self.val_f1_per_class = MultilabelF1Score(
-        #     num_labels=self.nb_labels, average=None, threshold=self.threshold
-        # )
         self.val_auroc = MultilabelAUROC(
             num_labels=self.nb_labels, average="macro"
         )
@@ -55,13 +52,14 @@ class ClassifierLightningModule(LightningModule):
         # Métrique personnalisée conjointe (Macro + Micro optimaux)
         self.val_optimal_f1 = OptimalMultiLabelF1(num_thresholds=19)
 
-    # def on_fit_start(self) -> None:
-    #     """Récupère et applique les poids de déséquilibre de classes depuis le DataModule."""
-    #     dm = getattr(self.trainer, "datamodule", None)
-    #     if self.use_pos_weights and dm is not None and getattr(dm, "pos_weights", None) is not None:
-    #         weights = dm.pos_weights.to(device=self.device, dtype=torch.float32)
-    #         self.register_buffer("pos_weight", weights)
-    #         self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+    def on_fit_start(self) -> None:
+        """Récupère et applique les poids de déséquilibre de classes depuis le DataModule si BCEWithLogitsLoss."""
+        if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss) and self.use_pos_weights:
+            dm = getattr(self.trainer, "datamodule", None)
+            if dm is not None and getattr(dm, "pos_weights", None) is not None:
+                weights = dm.pos_weights.to(device=self.device, dtype=torch.float32)
+                self.register_buffer("pos_weight", weights)
+                self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
 
     def forward(self, inputs: dict[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
         return self.net(inputs)
@@ -95,7 +93,6 @@ class ClassifierLightningModule(LightningModule):
 
         # Métriques standard
         self.val_f1_macro.update(preds, targets_int)
-        # self.val_f1_per_class.update(preds, targets_int)
         self.val_auroc.update(probs, targets_int)
 
         # Mise à jour de la métrique personnalisée (stockage sur CPU)
@@ -110,41 +107,31 @@ class ClassifierLightningModule(LightningModule):
 
         self.log("valid/f1_opt_macro", metrics["f1_macro_opt"], prog_bar=True)
         self.log("valid/best_thresh_macro", metrics["thresh_macro"], prog_bar=False)
+        self.log("valid/f1_opt_per_class_macro", metrics["f1_macro_per_class_opt"], prog_bar=True)
         self.log("valid/f1_opt_micro", metrics["f1_micro_opt"], prog_bar=True)
         self.log("valid/best_thresh_micro", metrics["thresh_micro"], prog_bar=False)
 
         # Réinitialisation pour la prochaine époque
         self.val_optimal_f1.reset()
 
-<<<<<<< HEAD
-    def configure_optimizers(self) -> OptimizerConfig | OptimizerLRSchedulerConfig:
-        optimizer = self.optimizer_class(params=self.net.parameters())
-=======
-        thresholds = torch.linspace(0.05, 0.95, steps=19).view(-1, 1, 1)
-
-        preds_bin = (all_probs.unsqueeze(0) >= thresholds).to(torch.float32)
-        targets_exp = all_targets.unsqueeze(0)
-
-        tp = (preds_bin * targets_exp).sum(dim=1)
-        fp = (preds_bin * (1.0 - targets_exp)).sum(dim=1)
-        fn = ((1.0 - preds_bin) * targets_exp).sum(dim=1)
-
-        # Calcul du F1 par classe puis moyenne Macro par seuil : Shape (19,)
-        denom = 2.0 * tp + fp + fn
-        f1_per_class = torch.where(denom > 0, (2.0 * tp) / denom, torch.zeros_like(denom))
-        macro_f1_per_thresh = f1_per_class.mean(dim=1)
-
-        best_idx = int(torch.argmax(macro_f1_per_thresh).item())
-        best_f1 = macro_f1_per_thresh[best_idx].item()
-        best_thresh = thresholds.view(-1)[best_idx].item()
-
-        self.log("valid/f1_opt_global", best_f1, prog_bar=True)
-        self.log("valid/best_threshold", best_thresh, prog_bar=False)
-
     def configure_optimizers(
         self,
     ) -> OptimizerConfig | OptimizerLRSchedulerConfig:
-        trainable_params = [p for p in self.net.parameters() if p.requires_grad]
+        backbone_mod = getattr(self.net, "backbone", None)
+        head_mod = getattr(self.net, "head", None)
+        if backbone_mod is not None and head_mod is not None:
+            backbone_params = [p for p in backbone_mod.parameters() if p.requires_grad]
+            head_params = [p for p in head_mod.parameters() if p.requires_grad]
+            if backbone_params:
+                param_groups: list = [
+                    {"params": head_params},
+                    {"params": backbone_params, "lr": self.backbone_lr},
+                ]
+            else:
+                param_groups = head_params
+        else:
+            param_groups = [p for p in self.net.parameters() if p.requires_grad]
+
         opt_kwargs = {}
         if hasattr(torch, "xpu") and torch.xpu.is_available():
             # Sur GPU Intel Arc / Level-Zero sous Windows, l'implémentation multi-tenseurs
@@ -152,10 +139,9 @@ class ClassifierLightningModule(LightningModule):
             # (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, erreur 39). On force l'exécution unitaire (foreach=False).
             opt_kwargs["foreach"] = False
         try:
-            optimizer = self.optimizer_class(params=trainable_params, **opt_kwargs)  # ty:ignore[missing-argument]
+            optimizer = self.optimizer_class(params=param_groups, **opt_kwargs)  # ty:ignore[missing-argument]
         except TypeError:
-            optimizer = self.optimizer_class(params=trainable_params)  # ty:ignore[missing-argument]
->>>>>>> remotes/origin/v-gpu
+            optimizer = self.optimizer_class(params=param_groups)  # ty:ignore[missing-argument]
         if self.scheduler_class is not None:
             scheduler = self.scheduler_class(optimizer=optimizer)
             return {

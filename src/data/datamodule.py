@@ -1,17 +1,18 @@
 import logging
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 from typing import Any
+
 import numpy as np
 import torch
-from functools import partial
-from lightning import LightningDataModule
-from torch.utils.data import DataLoader
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+from lightning import LightningDataModule
 from rdkit import Chem
 from rdkit.Chem.Scaffolds import MurckoScaffold
-from unimol_tools.data import Dictionary
+from torch.utils.data import DataLoader
 from unimol_tools.config import MODEL_CONFIG
+from unimol_tools.data import Dictionary
 from unimol_tools.weights import get_weight_dir, weight_download
 
 from src.data.components.conformer_dataset import Conformer3DDataset, unimol_tensor_collate_fn
@@ -54,7 +55,7 @@ def scaffold_split(
 
     rng = np.random.RandomState(seed)
     scaffold_groups = list(scaffold_to_indices.values())
-    
+
     # Random Scaffold Split : mélange aléatoire sans tri destructif
     rng.shuffle(scaffold_groups)
 
@@ -93,11 +94,7 @@ class OdomolDataModule(LightningDataModule):
         jitter_max: float = 0.04,
         permute_atoms: bool = True,
         max_pos_weight: float = 20.0,  # Plafond anti-overfitting
-<<<<<<< HEAD
-        dynamic_augmentation: bool = True
-=======
-        dyn_augmentation: bool = True,
->>>>>>> remotes/origin/v-gpu
+        dynamic_augmentation: bool = True,
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -118,6 +115,7 @@ class OdomolDataModule(LightningDataModule):
             weight_download(dict_name, weight_dir)
         with dict_path.open("r", encoding="utf-8") as dictionary_file:
             self.dictionary = Dictionary.load(dictionary_file)
+        self.dictionary.add_symbol("[MASK]", is_special=True)
         self.pad_idx = self.dictionary.pad()
 
         # 1. Chargement unique du fichier .pt en mémoire CPU
@@ -204,11 +202,7 @@ class OdomolDataModule(LightningDataModule):
             jitter_min=self.hparams.jitter_min,
             jitter_max=self.hparams.jitter_max,
             permute_atoms=self.hparams.permute_atoms,
-<<<<<<< HEAD
             dynamic_augmentation=self.hparams.dynamic_augmentation,
-=======
-            dyn_augmentation=self.hparams.dyn_augmentation,
->>>>>>> remotes/origin/v-gpu
         )
 
         self.data_val = Conformer3DDataset(

@@ -36,7 +36,7 @@ Le projet a évolué d'une approche par embeddings 2D pré-calculés vers une ge
   * **Échantillonnage de conformères** : Tirage aléatoire uniforme d'un conformère parmi les 20 disponibles à chaque époque.
   * **Permutation atomique** : Randomisation de l'ordre des atomes (`torch.randperm`), équivalent 3D de la randomisation SMILES, forçant l'invariance à l'ordre.
   * **Jittering 3D** : Bruit gaussien isotrope continu $\mathcal{N}(0, \sigma^2)$ injecté sur les coordonnées $(x, y, z)$ avec $\sigma \in [0.01, 0.04]$ Å.
-  * **Contrôle dynamique** : Drapeau `dyn_augmentation: bool` pour activer/désactiver l'augmentation à la volée (l'expérience 11 a montré qu'un entraînement sans augmentation dynamique permettait une meilleure convergence du F1).
+  * **Contrôle dynamique** : Drapeau `dynamic_augmentation: bool` pour activer/désactiver l'augmentation à la volée (l'expérience 11 a montré qu'un entraînement sans augmentation dynamique permettait une meilleure convergence du F1).
 * **En validation** :
   * Déterministe : Dernier conformère fixe, aucune permutation, aucun bruit 3D.
 

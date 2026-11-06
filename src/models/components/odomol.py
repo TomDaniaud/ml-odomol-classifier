@@ -28,10 +28,14 @@ class OdomolFineTuneNet(nn.Module):
 
         for param in self.backbone.parameters():
             param.requires_grad = False
+        self.backbone.eval()
 
         if unfreeze_last_n_layers > 0:
             for layer in self.backbone.encoder.layers[-unfreeze_last_n_layers:]:
                 for param in layer.parameters():
+                    param.requires_grad = True
+            if self.backbone.encoder.final_layer_norm is not None:
+                for param in self.backbone.encoder.final_layer_norm.parameters():
                     param.requires_grad = True
 
         self.head = ClassificationHead(
@@ -42,17 +46,34 @@ class OdomolFineTuneNet(nn.Module):
             num_layers=num_layers,
         )
 
+    def train(self, mode: bool = True) -> "OdomolFineTuneNet":
+        super().train(mode)
+        # Maintient les couches gelées du backbone en mode eval (désactive leurs Dropouts internes)
+        self.backbone.eval()
+        if mode and self.unfreeze_last_n_layers > 0:
+            for layer in self.backbone.encoder.layers[-self.unfreeze_last_n_layers :]:
+                layer.train(True)
+            if self.backbone.encoder.final_layer_norm is not None:
+                self.backbone.encoder.final_layer_norm.train(True)
+        return self
+
     def forward(self, batched_tensors: dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Ici batched_tensors contient directement les tenseurs PyTorch :
         src_tokens, src_distance, src_coord, src_edge_type
         """
-        cls_repr = self.backbone(
-            src_tokens=batched_tensors["src_tokens"],
-            src_distance=batched_tensors["src_distance"],
-            src_coord=batched_tensors["src_coord"],
-            src_edge_type=batched_tensors["src_edge_type"],
-            return_repr=True,
+        grad_ctx = (
+            torch.enable_grad()
+            if (self.training and self.unfreeze_last_n_layers > 0)
+            else torch.no_grad()
         )
+        with grad_ctx:
+            cls_repr = self.backbone(
+                src_tokens=batched_tensors["src_tokens"],
+                src_distance=batched_tensors["src_distance"],
+                src_coord=batched_tensors["src_coord"],
+                src_edge_type=batched_tensors["src_edge_type"],
+                return_repr=True,
+            )
 
         return self.head(cls_repr)
