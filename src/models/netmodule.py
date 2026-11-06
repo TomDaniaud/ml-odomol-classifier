@@ -116,8 +116,46 @@ class ClassifierLightningModule(LightningModule):
         # Réinitialisation pour la prochaine époque
         self.val_optimal_f1.reset()
 
+<<<<<<< HEAD
     def configure_optimizers(self) -> OptimizerConfig | OptimizerLRSchedulerConfig:
         optimizer = self.optimizer_class(params=self.net.parameters())
+=======
+        thresholds = torch.linspace(0.05, 0.95, steps=19).view(-1, 1, 1)
+
+        preds_bin = (all_probs.unsqueeze(0) >= thresholds).to(torch.float32)
+        targets_exp = all_targets.unsqueeze(0)
+
+        tp = (preds_bin * targets_exp).sum(dim=1)
+        fp = (preds_bin * (1.0 - targets_exp)).sum(dim=1)
+        fn = ((1.0 - preds_bin) * targets_exp).sum(dim=1)
+
+        # Calcul du F1 par classe puis moyenne Macro par seuil : Shape (19,)
+        denom = 2.0 * tp + fp + fn
+        f1_per_class = torch.where(denom > 0, (2.0 * tp) / denom, torch.zeros_like(denom))
+        macro_f1_per_thresh = f1_per_class.mean(dim=1)
+
+        best_idx = int(torch.argmax(macro_f1_per_thresh).item())
+        best_f1 = macro_f1_per_thresh[best_idx].item()
+        best_thresh = thresholds.view(-1)[best_idx].item()
+
+        self.log("valid/f1_opt_global", best_f1, prog_bar=True)
+        self.log("valid/best_threshold", best_thresh, prog_bar=False)
+
+    def configure_optimizers(
+        self,
+    ) -> OptimizerConfig | OptimizerLRSchedulerConfig:
+        trainable_params = [p for p in self.net.parameters() if p.requires_grad]
+        opt_kwargs = {}
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            # Sur GPU Intel Arc / Level-Zero sous Windows, l'implémentation multi-tenseurs
+            # (_multi_tensor_adam, foreach=True) provoque un crash lors de `torch._foreach_sqrt`
+            # (UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, erreur 39). On force l'exécution unitaire (foreach=False).
+            opt_kwargs["foreach"] = False
+        try:
+            optimizer = self.optimizer_class(params=trainable_params, **opt_kwargs)  # ty:ignore[missing-argument]
+        except TypeError:
+            optimizer = self.optimizer_class(params=trainable_params)  # ty:ignore[missing-argument]
+>>>>>>> remotes/origin/v-gpu
         if self.scheduler_class is not None:
             scheduler = self.scheduler_class(optimizer=optimizer)
             return {

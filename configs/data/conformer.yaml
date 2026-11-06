@@ -3,6 +3,7 @@ _target_: src.data.datamodule.OdomolDataModule
 data_file: ${paths.root_dir}/data/conformers_3d_dataset_100_000.pt
 batch_size: 32  # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 val_split: 0.2
+split_type: stratified  # 'stratified' ou 'scaffold'
 num_workers: 0
 pin_memory: False
 persistent_workers: False

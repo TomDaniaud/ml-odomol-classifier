@@ -26,3 +26,9 @@ subgroup: null # write tensorboard logs in subgroup/run_name
 description: null
 
 seed: 64
+
+hydra:
+  job_logging:
+    handlers:
+      file:
+        encoding: utf-8

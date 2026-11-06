@@ -8,6 +8,7 @@ net:
   out_channels: ${model.nb_labels}
   dropout: 0.2
   unfreeze_last_n_layers: 0   #defreeze backbone for finetunning
+  num_layers: 2
 
 
 optimizer:

@@ -45,6 +45,7 @@ comments:
 ckpt: -
 log: logs/tensorboard/augmentation/8x8bs-threshold-dyn-10-19_08-50-31
 
+<<<<<<< HEAD
 10 - dynamic augmentation off (FLO COMPLETE ICIIIIIIII)
 comments:
 ckpt: -
@@ -59,6 +60,27 @@ log: logs/tensorboard/losses/asl+f1_micro+300epch-10-25_22-54-29
 comments:
 ckpt: -
 log:
+=======
+10 - Optimization of the separation of 3D structures between train and val
+comments: supposed to decrease data leak, but same f1 (0.207)
+ckpt: -
+log: logs/tensorboard/scaffold/random-scaffold-split-10-20_20-58-37
+
+11 - no dyn_augmentation
+comments: better f1, dynamic augmentation is superflue, we suppose that learning rate is descending too fast. f1(0.23)
+ckpt: -
+log: logs/tensorboard/augmentation/no-dyn-augm-10-21_14-38-21
+
+12 - no scheduler
+comments: same f1
+ckpt: -
+log: logs/tensorboard/scheduler/no-scheduler-10-21_14-59-44
+
+13 - 3-layer MLP decoder (512 -> 256 -> 128 -> 138)
+comments: test de 3 couches de MLP dans le décodeur après Uni-Mol avec régularisation, n'améliore pas le f1 (0.225)
+ckpt: -
+log: logs/tensorboard/decoder/mlp-3layers-10-21_22-03-49
+>>>>>>> remotes/origin/v-gpu
 
 X - 
 comments:
