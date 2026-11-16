@@ -1,0 +1,22 @@
+compile: false
+nb_labels: 138
+optimizer: !!python/object/apply:functools.partial
+  args:
+  - &id001 !!python/name:torch.optim.adamw.AdamW ''
+  state: !!python/tuple
+  - *id001
+  - !!python/tuple []
+  - lr: 0.001
+    weight_decay: 0.05
+  - null
+scheduler: !!python/object/apply:functools.partial
+  args:
+  - &id002 !!python/name:torch.optim.lr_scheduler.CosineAnnealingLR ''
+  state: !!python/tuple
+  - *id002
+  - !!python/tuple []
+  - T_max: 1000
+    eta_min: 1.0e-06
+  - null
+threshold: 0.5
+use_pos_weights: true

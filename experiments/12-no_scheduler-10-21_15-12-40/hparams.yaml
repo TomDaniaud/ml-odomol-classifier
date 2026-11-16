@@ -1,0 +1,13 @@
+compile: false
+nb_labels: 138
+optimizer: !!python/object/apply:functools.partial
+  args:
+  - &id001 !!python/name:torch.optim.adamw.AdamW ''
+  state: !!python/tuple
+  - *id001
+  - !!python/tuple []
+  - lr: 0.001
+    weight_decay: 0.05
+  - null
+scheduler: null
+use_pos_weights: true
