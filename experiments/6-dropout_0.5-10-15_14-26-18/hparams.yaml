@@ -1,0 +1,85 @@
+batch_size: 64
+compile: false
+dataset_class: !!python/object/apply:functools.partial
+  args:
+  - &id001 !!python/name:src.data.components.unimol_dataset.UnimolOdorDataset ''
+  state: !!python/tuple
+  - *id001
+  - !!python/tuple []
+  - data_file: "/Users/tomac/Desktop/Projects/ClassificationMole\u0301cule/ml-odomol-classifier/data/unimol_embeddings.pt"
+  - null
+nb_labels: 138
+num_workers: 8
+optimizer: !!python/object/apply:functools.partial
+  args:
+  - &id002 !!python/name:torch.optim.adamw.AdamW ''
+  state: !!python/tuple
+  - *id002
+  - !!python/tuple []
+  - lr: 0.001
+    weight_decay: 0.05
+  - null
+persistent_workers: true
+pin_memory: false
+pos_weights_path: data/pos_weights.pt
+scheduler: !!python/object/apply:functools.partial
+  args:
+  - &id003 !!python/name:torch.optim.lr_scheduler.ReduceLROnPlateau ''
+  state: !!python/tuple
+  - *id003
+  - !!python/tuple []
+  - factor: 0.8
+    mode: min
+    patience: 15
+  - null
+seed: 64
+train_val_test_split: &id004 !!python/object:omegaconf.listconfig.ListConfig
+  _content:
+  - !!python/object:omegaconf.nodes.AnyNode
+    _metadata: !!python/object:omegaconf.base.Metadata
+      flags: {}
+      flags_root: false
+      key: 0
+      object_type: null
+      optional: true
+      ref_type: &id005 !!python/name:typing.Any ''
+      resolver_cache: !!python/object/apply:collections.defaultdict
+      - &id006 !!python/name:builtins.dict ''
+    _parent: *id004
+    _val: 0.8
+  - !!python/object:omegaconf.nodes.AnyNode
+    _metadata: !!python/object:omegaconf.base.Metadata
+      flags: {}
+      flags_root: false
+      key: 1
+      object_type: null
+      optional: true
+      ref_type: *id005
+      resolver_cache: !!python/object/apply:collections.defaultdict
+      - *id006
+    _parent: *id004
+    _val: 0.1
+  - !!python/object:omegaconf.nodes.AnyNode
+    _metadata: !!python/object:omegaconf.base.Metadata
+      flags: {}
+      flags_root: false
+      key: 2
+      object_type: null
+      optional: true
+      ref_type: *id005
+      resolver_cache: !!python/object/apply:collections.defaultdict
+      - *id006
+    _parent: *id004
+    _val: 0.1
+  _metadata: !!python/object:omegaconf.base.ContainerMetadata
+    element_type: *id005
+    flags: {}
+    flags_root: false
+    key: null
+    key_type: !!python/name:builtins.int ''
+    object_type: !!python/name:builtins.list ''
+    optional: true
+    ref_type: *id005
+    resolver_cache: !!python/object/apply:collections.defaultdict
+    - *id006
+  _parent: null
