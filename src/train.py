@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import sys
@@ -40,6 +41,7 @@ for name in ["lightning", "lightning.pytorch"]:
     lg.propagate = True
 
 register_resolvers()
+torch.serialization.add_safe_globals([functools.partial])
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default.yaml")
 def main(cfg: DictConfig):
@@ -104,6 +106,7 @@ def main(cfg: DictConfig):
         model=model,
         datamodule=datamodule,
         ckpt_path=cfg.get("ckpt_path"),
+        weights_only=False,
     )
 
 

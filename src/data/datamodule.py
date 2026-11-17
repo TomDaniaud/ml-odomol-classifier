@@ -6,7 +6,10 @@ from typing import Any
 
 import numpy as np
 import torch
-from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+from iterstrat.ml_stratifiers import (
+    MultilabelStratifiedKFold,
+    MultilabelStratifiedShuffleSplit,
+)
 from lightning import LightningDataModule
 from rdkit import Chem
 from rdkit.Chem.Scaffolds import MurckoScaffold
@@ -79,12 +82,61 @@ def scaffold_split(
     return train_idx, val_idx
 
 
+def scaffold_kfold_split(
+    all_molecules: list[dict[str, Any]],
+    num_folds: int = 5,
+    fold_index: int = 0,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Découpe les molécules en K plis disjoints par squelettes de Bemis-Murcko (Scaffold K-Fold).
+    Chaque famille de squelettes est assignée intégralement à un seul pli afin de garantir
+    zéro fuite structurelle entre Train et Val sur chacun des K plis, tout en équilibrant
+    la taille des plis.
+    """
+    if not (0 <= fold_index < num_folds):
+        raise ValueError(f"fold_index ({fold_index}) doit être compris entre 0 et {num_folds - 1}.")
+
+    scaffold_to_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, mol in enumerate(all_molecules):
+        scaff = generate_scaffold(mol.get("smiles", ""))
+        scaffold_to_indices[scaff].append(idx)
+
+    rng = np.random.RandomState(seed)
+    scaffold_groups = list(scaffold_to_indices.values())
+    rng.shuffle(scaffold_groups)
+    scaffold_groups.sort(key=len, reverse=True)
+
+    folds: list[list[int]] = [[] for _ in range(num_folds)]
+    fold_sizes = np.zeros(num_folds, dtype=np.int64)
+
+    for group in scaffold_groups:
+        target_fold = int(np.argmin(fold_sizes))
+        folds[target_fold].extend(group)
+        fold_sizes[target_fold] += len(group)
+
+    val_idx = np.array(folds[fold_index], dtype=np.int64)
+    train_indices: list[int] = []
+    for k in range(num_folds):
+        if k != fold_index:
+            train_indices.extend(folds[k])
+    train_idx = np.array(train_indices, dtype=np.int64)
+
+    rng.shuffle(train_idx)
+    rng.shuffle(val_idx)
+    return train_idx, val_idx
+
+
 class OdomolDataModule(LightningDataModule):
+    _shared_payload_cache: dict[str, dict[str, Any]] = {}
+
     def __init__(
         self,
         data_file: str | Path,
         val_split: float = 0.2,
         split_type: str = "stratified",
+        num_folds: int = 1,
+        fold_index: int = 0,
         batch_size: int = 32,
         num_workers: int = 4,
         persistent_workers: bool = True,
@@ -102,6 +154,8 @@ class OdomolDataModule(LightningDataModule):
         self.data_train: Conformer3DDataset | None = None
         self.data_val: Conformer3DDataset | None = None
         self.pos_weights: torch.Tensor | None = None
+        self.train_idx: np.ndarray | None = None
+        self.val_idx: np.ndarray | None = None
 
     def setup(self, stage: str | None = None) -> None:
         if self.data_train is not None and self.data_val is not None:
@@ -118,10 +172,13 @@ class OdomolDataModule(LightningDataModule):
         self.dictionary.add_symbol("[MASK]", is_special=True)
         self.pad_idx = self.dictionary.pad()
 
-        # 1. Chargement unique du fichier .pt en mémoire CPU
-        payload = torch.load(
-            self.hparams.data_file, map_location="cpu", weights_only=False
-        )
+        # 1. Chargement unique du fichier .pt en mémoire CPU (mis en cache entre les plis K-Fold)
+        data_key = str(Path(self.hparams.data_file).resolve())
+        if data_key not in self._shared_payload_cache:
+            self._shared_payload_cache[data_key] = torch.load(
+                self.hparams.data_file, map_location="cpu", weights_only=False
+            )
+        payload = self._shared_payload_cache[data_key]
         all_molecules: list[dict[str, Any]] = payload["molecules"]
         label_names: list[str] = payload.get("label_names", [])
 
@@ -131,34 +188,77 @@ class OdomolDataModule(LightningDataModule):
         )
         indices = np.arange(len(all_molecules))
 
-        # 3. Choix de la stratégie de split
+        # 3. Choix de la stratégie de split (Hold-out classique ou Validation Croisée K-Fold)
         split_choice = str(self.hparams.split_type).lower()
-        if split_choice == "scaffold":
-            log.info("Application du Scaffold Split (Bemis-Murcko)...")
-            train_idx, val_idx = scaffold_split(
-                all_molecules=all_molecules,
-                val_split=self.hparams.val_split,
-                seed=self.hparams.seed,
+        num_folds = int(getattr(self.hparams, "num_folds", 1))
+        fold_index = int(getattr(self.hparams, "fold_index", 0))
+
+        if num_folds > 1:
+            if not (0 <= fold_index < num_folds):
+                raise ValueError(
+                    f"fold_index ({fold_index}) invalide pour num_folds={num_folds} "
+                    f"(doit être dans [0, {num_folds - 1}])."
+                )
+            if split_choice == "scaffold":
+                log.info(
+                    f"Application du Scaffold K-Fold Split (pli {fold_index + 1}/{num_folds})..."
+                )
+                train_idx, val_idx = scaffold_kfold_split(
+                    all_molecules=all_molecules,
+                    num_folds=num_folds,
+                    fold_index=fold_index,
+                    seed=self.hparams.seed,
+                )
+            elif split_choice == "stratified":
+                log.info(
+                    f"Application du Split K-Fold Stratifié Multi-Label (pli {fold_index + 1}/{num_folds})..."
+                )
+                mskf = MultilabelStratifiedKFold(
+                    n_splits=num_folds,
+                    shuffle=True,
+                    random_state=self.hparams.seed,
+                )
+                all_splits = list(mskf.split(indices, labels_matrix))
+                train_idx, val_idx = all_splits[fold_index]
+            else:
+                raise ValueError(
+                    f"split_type non reconnu : '{self.hparams.split_type}'. "
+                    "Valeurs acceptées : 'stratified', 'scaffold'."
+                )
+            log.info(
+                f"Split K-Fold [{self.hparams.split_type}, pli {fold_index + 1}/{num_folds}] -> "
+                f"Train : {len(train_idx)} molécules ({len(train_idx)/len(all_molecules)*100:.1f}%), "
+                f"Val : {len(val_idx)} molécules ({len(val_idx)/len(all_molecules)*100:.1f}%)"
             )
-        elif split_choice == "stratified":
-            log.info("Application du Split Stratifié Multi-Label...")
-            msss = MultilabelStratifiedShuffleSplit(
-                n_splits=1,
-                test_size=self.hparams.val_split,
-                random_state=self.hparams.seed,
-            )
-            train_idx, val_idx = next(msss.split(indices, labels_matrix))
         else:
-            raise ValueError(
-                f"split_type non reconnu : '{self.hparams.split_type}'. "
-                "Valeurs acceptées : 'stratified', 'scaffold'."
+            if split_choice == "scaffold":
+                log.info("Application du Scaffold Split (Bemis-Murcko)...")
+                train_idx, val_idx = scaffold_split(
+                    all_molecules=all_molecules,
+                    val_split=self.hparams.val_split,
+                    seed=self.hparams.seed,
+                )
+            elif split_choice == "stratified":
+                log.info("Application du Split Stratifié Multi-Label...")
+                msss = MultilabelStratifiedShuffleSplit(
+                    n_splits=1,
+                    test_size=self.hparams.val_split,
+                    random_state=self.hparams.seed,
+                )
+                train_idx, val_idx = next(msss.split(indices, labels_matrix))
+            else:
+                raise ValueError(
+                    f"split_type non reconnu : '{self.hparams.split_type}'. "
+                    "Valeurs acceptées : 'stratified', 'scaffold'."
+                )
+            log.info(
+                f"Split effectué [{self.hparams.split_type}] -> "
+                f"Train : {len(train_idx)} molécules ({len(train_idx)/len(all_molecules)*100:.1f}%), "
+                f"Val : {len(val_idx)} molécules ({len(val_idx)/len(all_molecules)*100:.1f}%)"
             )
 
-        log.info(
-            f"Split effectué [{self.hparams.split_type}] -> "
-            f"Train : {len(train_idx)} molécules ({len(train_idx)/len(all_molecules)*100:.1f}%), "
-            f"Val : {len(val_idx)} molécules ({len(val_idx)/len(all_molecules)*100:.1f}%)"
-        )
+        self.train_idx = np.asarray(train_idx, dtype=np.int64)
+        self.val_idx = np.asarray(val_idx, dtype=np.int64)
 
         # Vérification de la couverture des 138 odeurs dans Train et Val
         val_labels = labels_matrix[val_idx]
