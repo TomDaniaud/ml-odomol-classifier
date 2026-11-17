@@ -26,7 +26,7 @@ class ClassifierLightningModule(LightningModule):
         backbone_lr: float = 1e-4,
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["net", "criterion"])
+        self.save_hyperparameters(ignore=["net", "criterion", "optimizer", "scheduler"])
 
         self.net = cast(torch.nn.Module, torch.compile(net)) if compile else net
         self.optimizer_class = optimizer
