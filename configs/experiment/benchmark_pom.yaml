@@ -1,0 +1,76 @@
+# @package _global_
+#
+# Protocole d'évaluation de Han et al. (2026), arXiv:2608.25893, identique à POM / OpenPOM :
+#   - test GS-LF tenu à l'écart (stratification itérative, 20 %), jamais vu pendant l'entraînement ;
+#   - validation croisée 5 plis sur le reste, sélection du checkpoint sur l'AUROC de validation ;
+#   - seuils par label appris sur les prédictions out-of-fold, ensemble des 5 modèles sur le test ;
+#   - AUROC / AUPRC / F1 / précision / rappel macro + IC 95 % bootstrap.
+#
+# Prérequis (une fois) :  uv run src/scripts/make_benchmark_split.py
+# Lancement :             uv run src/cross_val.py experiment=benchmark_pom
+# Ensemble de plusieurs runs : uv run src/evaluate_benchmark.py outputs/<run1> outputs/<run2> ...
+
+defaults:
+  - /tags: default
+  - override /trainer: default
+  - override /model: odomol
+  - override /data: conformer
+  - override /callbacks: default
+
+rn: "benchmark-pom-asl-unimol"
+run_name: "${rn}-${now:%m-%d_%H-%M-%S}"
+subgroup: benchmark
+description: "Protocole Han et al. 2026 : test GS-LF tenu à l'écart, CV 5 plis, seuils OOF par label, ensemble sur le test"
+
+seed: 64
+float32_matmul_precision: high
+
+trainer:
+  max_epochs: 65
+  accumulate_grad_batches: 8
+  gradient_clip_val: 1.0
+  precision: 32-true
+
+callbacks:
+  model_checkpoint:
+    monitor: "valid/auroc_macro"  # l'article sélectionne sur l'AUROC de validation
+    mode: "max"
+
+data:
+  split_type: benchmark
+  split_file: ${paths.root_dir}/data/splits/gslf_pom_benchmark_split.json
+  num_folds: 5
+  fold_index: 0
+  batch_size: 8
+  persistent_workers: True
+  num_workers: 0
+  dynamic_augmentation: true
+  permute_atoms: false
+  jitter_min: 0.01
+  jitter_max: 0.04
+
+# Modèle et optimisation : identiques à cross_val_5fold.yaml (seul le protocole d'évaluation change)
+model:
+  backbone_lr: 7e-5
+
+  net:
+    dropout: 0.4
+    unfreeze_last_n_layers: 2
+
+  criterion:
+    _target_: src.models.losses.AsymmetricLoss
+    gamma_neg: 2.0
+    gamma_pos: 0.0
+    clip: 0.05
+
+  optimizer:
+    _target_: torch.optim.AdamW
+    _partial_: true
+    lr: 0.001
+    weight_decay: 0.05
+
+  scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: ${trainer.max_epochs}
+    eta_min: 1e-6

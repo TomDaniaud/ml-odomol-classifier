@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from functools import partial
@@ -147,15 +148,57 @@ class OdomolDataModule(LightningDataModule):
         permute_atoms: bool = True,
         max_pos_weight: float = 20.0,  # Plafond anti-overfitting
         dynamic_augmentation: bool = True,
+        split_file: str | Path | None = None,  # requis pour split_type='benchmark'
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
 
         self.data_train: Conformer3DDataset | None = None
         self.data_val: Conformer3DDataset | None = None
+        self.data_test: Conformer3DDataset | None = None
         self.pos_weights: torch.Tensor | None = None
         self.train_idx: np.ndarray | None = None
         self.val_idx: np.ndarray | None = None
+        self.test_idx: np.ndarray | None = None
+        self.source_indices: np.ndarray | None = None  # position -> ligne du CSV GS-LF
+
+    def _benchmark_split(
+        self, all_molecules: list[dict[str, Any]], num_folds: int, fold_index: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Découpage figé du protocole POM / Han et al. 2026 (voir src/scripts/make_benchmark_split.py).
+
+        Le fichier liste des `source_index` (lignes du CSV) : test tenu à l'écart + plis de validation croisée
+        sur le reste. Les molécules sans conformère 3D (échecs RDKit) sont absentes du fichier .pt et donc
+        ignorées ; leur nombre est journalisé.
+        """
+        if not self.hparams.split_file:
+            raise ValueError("split_type='benchmark' exige data.split_file (voir make_benchmark_split.py).")
+        split = json.loads(Path(self.hparams.split_file).read_text(encoding="utf-8"))
+        folds: list[list[int]] = split["folds"]
+        if num_folds > 1 and num_folds != len(folds):
+            raise ValueError(f"num_folds={num_folds} mais le fichier de split contient {len(folds)} plis.")
+
+        pos_of = {int(mol["source_index"]): i for i, mol in enumerate(all_molecules)}
+
+        def to_positions(source_ids: list[int], name: str) -> np.ndarray:
+            kept = [pos_of[s] for s in source_ids if s in pos_of]
+            if len(kept) < len(source_ids):
+                missing = sorted(set(source_ids) - set(pos_of))
+                log.warning(f"[benchmark] {len(missing)} molécule(s) du {name} sans conformère 3D ignorée(s) : "
+                            f"source_index {missing}")
+            return np.asarray(kept, dtype=np.int64)
+
+        test_idx = to_positions(split["test"], "test")
+        val_fold = fold_index if num_folds > 1 else 0
+        val_idx = to_positions(folds[val_fold], f"pli {val_fold}")
+        train_source = [s for k, fold in enumerate(folds) if k != val_fold for s in fold]
+        train_idx = to_positions(train_source, "train")
+        log.info(
+            f"Split benchmark [{split.get('method')} ordre {split.get('stratification_order')}, "
+            f"pli {val_fold + 1}/{len(folds)}] -> Train : {len(train_idx)}, Val : {len(val_idx)}, "
+            f"Test (tenu à l'écart) : {len(test_idx)}"
+        )
+        return train_idx, val_idx, test_idx
 
     def setup(self, stage: str | None = None) -> None:
         if self.data_train is not None and self.data_val is not None:
@@ -192,8 +235,12 @@ class OdomolDataModule(LightningDataModule):
         split_choice = str(self.hparams.split_type).lower()
         num_folds = int(getattr(self.hparams, "num_folds", 1))
         fold_index = int(getattr(self.hparams, "fold_index", 0))
+        test_idx: np.ndarray | None = None
+        self.source_indices = np.asarray([int(m["source_index"]) for m in all_molecules], dtype=np.int64)
 
-        if num_folds > 1:
+        if split_choice == "benchmark":
+            train_idx, val_idx, test_idx = self._benchmark_split(all_molecules, num_folds, fold_index)
+        elif num_folds > 1:
             if not (0 <= fold_index < num_folds):
                 raise ValueError(
                     f"fold_index ({fold_index}) invalide pour num_folds={num_folds} "
@@ -223,7 +270,7 @@ class OdomolDataModule(LightningDataModule):
             else:
                 raise ValueError(
                     f"split_type non reconnu : '{self.hparams.split_type}'. "
-                    "Valeurs acceptées : 'stratified', 'scaffold'."
+                    "Valeurs acceptées : 'stratified', 'scaffold', 'benchmark'."
                 )
             log.info(
                 f"Split K-Fold [{self.hparams.split_type}, pli {fold_index + 1}/{num_folds}] -> "
@@ -312,6 +359,16 @@ class OdomolDataModule(LightningDataModule):
             is_train=False,
         )
 
+        # Jeu de test tenu à l'écart (split 'benchmark' uniquement) : déterministe, comme la validation
+        if test_idx is not None:
+            self.test_idx = np.asarray(test_idx, dtype=np.int64)
+            self.data_test = Conformer3DDataset(
+                molecules=[all_molecules[i] for i in self.test_idx],
+                label_names=label_names,
+                dictionary=self.dictionary,
+                is_train=False,
+            )
+
     def train_dataloader(self) -> DataLoader:
         collate_fn = partial(unimol_tensor_collate_fn, pad_idx=self.pad_idx)
         return DataLoader(
@@ -323,6 +380,19 @@ class OdomolDataModule(LightningDataModule):
                 self.hparams.persistent_workers if self.hparams.num_workers > 0 else False
             ),
             shuffle=True,
+            collate_fn=collate_fn,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        if self.data_test is None:
+            raise RuntimeError("Aucun jeu de test : utiliser split_type='benchmark' avec data.split_file.")
+        collate_fn = partial(unimol_tensor_collate_fn, pad_idx=self.pad_idx)
+        return DataLoader(
+            dataset=self.data_test,
+            batch_size=self.hparams.batch_size,
+            num_workers=self.hparams.num_workers,
+            pin_memory=self.hparams.pin_memory,
+            shuffle=False,
             collate_fn=collate_fn,
         )
 
