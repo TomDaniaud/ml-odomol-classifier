@@ -36,7 +36,7 @@ from torchmetrics.classification import MultilabelAUROC
 os.environ["HYDRA_FULL_ERROR"] = "1"
 rootutils.setup_root(__file__, indicator="pyproject.toml", pythonpath=True)
 
-from src.models.benchmark_metrics import evaluate_benchmark, format_table  # noqa: E402
+from src.models.benchmark_metrics import evaluate  # noqa: E402
 from src.models.metrics import OptimalMultiLabelF1  # noqa: E402
 from src.utils.hardware import get_hardware_strategy  # noqa: E402
 from src.utils.resolvers import register_resolvers  # noqa: E402
@@ -190,10 +190,7 @@ def main(cfg: DictConfig) -> None:
     fold_probs_dict: dict[int, torch.Tensor] = {}
     fold_targets_dict: dict[int, torch.Tensor] = {}
     fold_val_indices: dict[int, np.ndarray] = {}
-    fold_val_source: dict[int, np.ndarray] = {}
-    fold_test_probs: dict[int, torch.Tensor] = {}
-    test_targets: torch.Tensor | None = None
-    test_source: np.ndarray | None = None
+    fold_test_probs: list[torch.Tensor] = []
 
     for fold_idx in range(num_folds):
         log.info("=" * 80)
@@ -296,14 +293,11 @@ def main(cfg: DictConfig) -> None:
         fold_targets_dict[fold_idx] = targets_k
         if getattr(datamodule, "val_idx", None) is not None:
             fold_val_indices[fold_idx] = datamodule.val_idx
-            if getattr(datamodule, "source_indices", None) is not None:
-                fold_val_source[fold_idx] = datamodule.source_indices[datamodule.val_idx]
 
-        # Prédictions du modèle de ce pli sur le jeu de test tenu à l'écart (protocole benchmark)
+        # Split 'benchmark' : le modèle de ce pli prédit aussi le jeu de test tenu à l'écart
         if getattr(datamodule, "data_test", None) is not None:
             test_probs_k, test_targets = collect_fold_predictions(model, datamodule, infer_device, split="test")
-            fold_test_probs[fold_idx] = test_probs_k
-            test_source = datamodule.source_indices[datamodule.test_idx]
+            fold_test_probs.append(test_probs_k)
 
         del trainer, model, datamodule
         release_accelerator_memory()
@@ -390,13 +384,8 @@ def main(cfg: DictConfig) -> None:
         "fold_probs": fold_probs_dict,
         "fold_targets": fold_targets_dict,
         "fold_val_indices": fold_val_indices,
-        "fold_val_source_indices": fold_val_source,
         "optimal_class_thresholds": optimal_class_thresholds,
         "cv_summary": json_report,
-        # Protocole benchmark (jeu de test tenu à l'écart) : une matrice de probabilités par modèle de pli
-        "fold_test_probs": fold_test_probs,
-        "test_targets": test_targets,
-        "test_source_indices": test_source,
     }
     oof_path = base_output_dir / "oof_predictions.pt"
     torch.save(oof_payload, oof_path)
@@ -404,19 +393,14 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Rapport de validation croisée sauvegardé dans : {report_path}")
     log.info(f"Prédictions OOF et seuils optimaux par classe sauvegardés dans : {oof_path}")
 
-    # --- ÉVALUATION SUR LE TEST, PROTOCOLE HAN ET AL. 2026 ---
+    # --- TEST TENU À L'ÉCART, PROTOCOLE HAN ET AL. 2026 ---
+    # Ensemble = moyenne des 5 modèles de pli ; seuils par label appris sur les prédictions OOF.
     if fold_test_probs:
-        result = evaluate_benchmark(
-            oof_probs=all_oof_probs.numpy(),
-            oof_targets=all_oof_targets.numpy(),
-            test_probs_per_model=[fold_test_probs[k].numpy() for k in sorted(fold_test_probs)],
-            test_targets=test_targets.numpy(),
-            seed=int(cfg.get("seed", 64)),
-        )
-        bench_path = base_output_dir / "benchmark_test_metrics.json"
-        bench_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(format_table(result))  # print brut : rich replierait le tableau à la largeur du terminal
-        log.info(f"Métriques de test (protocole Han et al. 2026) sauvegardées dans : {bench_path}")
+        test_probs = torch.stack(fold_test_probs).mean(dim=0)
+        result = evaluate(all_oof_probs.numpy(), all_oof_targets.numpy(), test_probs.numpy(), test_targets.numpy())
+        for name, (value, low, high) in result.items():
+            log.info(f"test/{name} = {value:.4f}  [IC 95 % : {low:.4f} – {high:.4f}]")
+        (base_output_dir / "test_metrics.json").write_text(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

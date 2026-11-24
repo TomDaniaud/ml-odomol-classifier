@@ -1,14 +1,6 @@
 # @package _global_
-#
-# Protocole d'évaluation de Han et al. (2026), arXiv:2608.25893, identique à POM / OpenPOM :
-#   - test GS-LF tenu à l'écart (stratification itérative, 20 %), jamais vu pendant l'entraînement ;
-#   - validation croisée 5 plis sur le reste, sélection du checkpoint sur l'AUROC de validation ;
-#   - seuils par label appris sur les prédictions out-of-fold, ensemble des 5 modèles sur le test ;
-#   - AUROC / AUPRC / F1 / précision / rappel macro + IC 95 % bootstrap.
-#
-# Prérequis (une fois) :  uv run src/scripts/make_benchmark_split.py
-# Lancement :             uv run src/cross_val.py experiment=benchmark_pom
-# Ensemble de plusieurs runs : uv run src/evaluate_benchmark.py outputs/<run1> outputs/<run2> ...
+# Protocole d'évaluation de Han et al. 2026 (arXiv:2608.25893) : cross_val_5fold + test tenu à l'écart.
+# Lancement : uv run src/cross_val.py experiment=benchmark_pom
 
 defaults:
   - /tags: default
@@ -49,7 +41,6 @@ data:
   jitter_min: 0.01
   jitter_max: 0.04
 
-# Modèle et optimisation : identiques à cross_val_5fold.yaml (seul le protocole d'évaluation change)
 model:
   backbone_lr: 7e-5
 
