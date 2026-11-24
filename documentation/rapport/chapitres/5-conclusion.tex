@@ -1,0 +1,95 @@
+\chapter{Conclusion}
+\label{chap:Conclusion}
+
+À l'issue de cette première phase, nous résumons le travail effectué, en tirons les principaux enseignements et présentons les perspectives de la phase~II.
+
+%--------------------------------------------------------------------------------
+
+\section{Résumé du travail effectué}
+\label{sec:Resume}
+
+Nous avons étudié l'apport d'un transformeur de graphes 3D pré-entraîné, Uni-Mol, à la prédiction multi-label des 138 descripteurs olfactifs du jeu GS-LF.
+L'étude bibliographique a situé ce choix par rapport aux GNN de référence, POM et OpenPOM, limités par la myopie de la propagation de messages et l'absence de géométrie, et nous a fait découvrir un travail récent appliquant Uni-Mol2 à la même tâche, dont nous avons repris le protocole d'évaluation.
+
+Nous avons développé une chaîne d'apprentissage complète~: génération de conformations 3D, encodage au format Uni-Mol, augmentation géométrique, décodeur MLP, perte asymétrique et dégel partiel de l'encodeur.
+Dix-sept expériences ont porté le F1 macro de validation de 0,205 à 0,354 et l'AUROC macro à 0,872.
+Ces valeurs sont du même ordre que celles des modèles de référence (F1 de 0,375 pour OpenPOM, 0,399 pour Uni-Mol2 ajusté), mais ne leur sont pas encore comparables~: elles sont mesurées sur la validation, sans test tenu à l'écart.
+Le protocole de référence, implémenté en fin de phase, permettra cette comparaison.
+
+%--------------------------------------------------------------------------------
+
+\section{Enseignements}
+\label{sec:Enseignements}
+
+\paragraph{Le protocole d'évaluation fait partie du résultat.}
+Un F1 n'a de sens qu'avec le découpage, le choix des seuils et la sélection du modèle qui l'accompagnent.
+Nous avons longtemps optimisé une mesure optimiste~; fixer le protocole de la littérature dès le début aurait permis des comparaisons fiables tout au long du projet.
+De même, F1 micro et F1 macro mesurent des choses différentes~: le premier, dominé par les descripteurs fréquents, est bien plus élevé que le second.
+
+\paragraph{Un modèle pré-entraîné exige un encodage exact.}
+Les écarts d'encodage que nous avons corrigés ne produisaient aucune erreur, seulement des performances dégradées.
+La correction a apporté l'un des gains les plus importants du projet~: vérifier la conformité des entrées au pré-entraînement est une étape à part entière.
+
+\paragraph{Le déséquilibre se traite à plusieurs niveaux.}
+La pondération des positifs, puis la perte asymétrique, ont apporté des gains nets, et le choix des seuils de décision en apporte d'autres.
+Ces leviers agissent à des niveaux différents (apprentissage, décision) et se combinent.
+
+\paragraph{Peu de données, beaucoup de paramètres.}
+Le dégel de l'encodeur améliore les performances mais provoque un surapprentissage rapide~: sur 4\,000 molécules, chaque million de paramètres libérés doit être justifié.
+
+\paragraph{Sur le plan de l'organisation.}
+Le suivi systématique des expériences (configuration, courbes et commentaire pour chacune) a rendu ce rapport possible et permet de revenir sur des conclusions antérieures.
+À l'inverse, modifier plusieurs paramètres à la fois a empêché d'attribuer certains gains.
+\acompleter{enseignements personnels de chaque auteur}
+
+%--------------------------------------------------------------------------------
+
+\section{Perspectives de recherche}
+\label{sec:Perspectives}
+
+\paragraph{Évaluer selon le protocole de référence.}
+La première étape de la phase~II est d'exécuter le protocole sur le jeu complet, afin de situer réellement notre modèle par rapport à POM, OpenPOM et Uni-Mol2.
+Il faudra ensuite maîtriser le surapprentissage lié au dégel (taux d'apprentissage plus faible pour l'encodeur, sélection du modèle sur l'AUROC, dégel progressif), revérifier les conclusions des expériences antérieures à la correction de l'encodage, et mener une recherche d'hyperparamètres.
+
+\paragraph{Passer à Uni-Mol2.}
+Le sujet désigne Uni-Mol2 comme modèle cible.
+Sa représentation de paires, qui combine géométrie et topologie, et sa taille supérieure devraient améliorer les performances, comme le suggère \cite{Han-2026}, au prix d'un coût de calcul plus élevé.
+
+\paragraph{Modéliser les dépendances entre descripteurs.}
+Le décodeur traite les 138 descripteurs comme indépendants~: chaque ligne $\mathbf{w}_j$ de la dernière matrice $\mathbf{W} \in \mathbb{R}^{138 \times 256}$ est apprise uniquement à partir des molécules qui portent ou non le descripteur $j$.
+Les descripteurs rares (31 exemples pour le plus rare) apprennent donc mal, alors que les confusions du modèle suivent les co-occurrences entre descripteurs \cite{Han-2026}.
+Nous proposons de contraindre la matrice sous la forme
+\begin{equation}
+   \label{eq:Factorisation}
+   \mathbf{W} = \mathbf{E} \, \mathbf{P},
+   \qquad
+   \mathbf{E} \in \mathbb{R}^{138 \times d},
+   \quad
+   \mathbf{P} \in \mathbb{R}^{d \times 256},
+   \quad
+   d < 138
+\end{equation}
+où $\mathbf{E}$ est figée et décrit chaque descripteur, par exemple par une décomposition en valeurs singulières de la matrice de co-occurrence calculée sur l'ensemble d'entraînement, et où seule $\mathbf{P}$ est apprise.
+Chaque $\mathbf{w}_j = \mathbf{e}_j \mathbf{P}$ est alors une combinaison de $d$ vecteurs partagés~: deux descripteurs aux profils de co-occurrence proches ont nécessairement des vecteurs proches, et les descripteurs rares bénéficient des exemples de leurs voisins.
+La condition $d < 138$ est essentielle~: si $d = 138$ et $\mathbf{E}$ est inversible, tout $\mathbf{W}$ reste atteignable et la contrainte disparaît.
+La dimension $d$ règle donc le degré de partage imposé entre descripteurs.
+Cette approche est un premier pas vers une représentation conjointe des molécules et des descripteurs, qui permettrait aussi de prédire des descripteurs absents de l'entraînement.
+
+\paragraph{Agréger des données, notamment stéréochimiques.}
+GS-LF est déjà la fusion des catalogues GoodScents et Leffingwell~; récupérer leurs versions brutes, par exemple via la plateforme Pyrfume, apporterait peu de nouvelles molécules.
+Leur intérêt est ailleurs~: GS-LF a perdu la stéréochimie lors de sa constitution (les SMILES sont non stéréospécifiques), et les sources d'origine pourraient la contenir, ainsi qu'un vocabulaire plus riche.
+D'autres bases (Dravnieks, Keller, Arctander) apporteraient de nouvelles molécules, avec leurs propres vocabulaires.
+L'agrégation impose d'harmoniser ces vocabulaires, de résoudre les annotations contradictoires et, surtout, d'exclure toute molécule du test de GS-LF pour préserver la comparabilité.
+La factorisation~\eqref{eq:Factorisation} s'y prête naturellement~: chaque source peut avoir ses propres lignes dans $\mathbf{E}$ tout en partageant $\mathbf{P}$.
+
+L'objectif est de donner un réel avantage à l'encodeur 3D par rapport à un encodeur topologique.
+Mais une limite doit être levée~: Uni-Mol ne voit que des distances, qui sont identiques pour deux énantiomères.
+Les données chirales n'aideront donc que pour les diastéréoisomères, sauf à fournir explicitement la configuration des centres stéréogènes au modèle, par exemple comme caractéristique de chaque atome.
+Un test simple, comparer les sorties du modèle pour les deux énantiomères de la carvone, permettra de vérifier ce point avant d'engager l'agrégation.
+
+\paragraph{Expliquer les prédictions.}
+Le sujet demande d'expliquer le fonctionnement du modèle sur quelques molécules.
+Les cartes d'attention d'Uni-Mol et des méthodes d'attribution par atome permettraient de vérifier si les prédictions s'appuient sur des groupes fonctionnels connus pour leur rôle olfactif (esters pour le fruité, composés soufrés, etc.).
+
+\paragraph{Compléter l'état de l'art.}
+Les travaux GraphNOSE \cite{Sharma-2026} et sur les représentations à double graphe \cite{Zhang-2026}, identifiés en fin de phase, seront étudiés et comparés à notre approche.

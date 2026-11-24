@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from functools import partial
@@ -155,12 +156,14 @@ class OdomolDataModule(LightningDataModule):
         dynamic_augmentation: bool = True,
         backbone_version: str = "unimol",
         max_atoms: int = 256,
+        split_file: str | None = None,  # requis pour split_type='benchmark'
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
 
         self.data_train: Conformer3DDataset | Conformer3DUniMol2Dataset | None = None
         self.data_val: Conformer3DDataset | Conformer3DUniMol2Dataset | None = None
+        self.data_test: Conformer3DDataset | Conformer3DUniMol2Dataset | None = None
         self.pos_weights: torch.Tensor | None = None
         self.train_idx: np.ndarray | None = None
         self.val_idx: np.ndarray | None = None
@@ -205,8 +208,21 @@ class OdomolDataModule(LightningDataModule):
         split_choice = str(self.hparams.split_type).lower()
         num_folds = int(getattr(self.hparams, "num_folds", 1))
         fold_index = int(getattr(self.hparams, "fold_index", 0))
+        test_idx = None
 
-        if num_folds > 1:
+        if split_choice == "benchmark":
+            # Découpage figé du protocole POM (src/scripts/make_benchmark_split.py), en lignes du CSV.
+            # Les 6 molécules sans conformère 3D sont absentes du .pt : elles sont ignorées.
+            split = json.loads(Path(self.hparams.split_file).read_text())
+            pos = {int(m["source_index"]): i for i, m in enumerate(all_molecules)}
+
+            def rows_to_idx(rows: list[int]) -> np.ndarray:
+                return np.array([pos[r] for r in rows if r in pos])
+
+            val_idx = rows_to_idx(split["folds"][fold_index])
+            train_idx = rows_to_idx([r for k, fold in enumerate(split["folds"]) if k != fold_index for r in fold])
+            test_idx = rows_to_idx(split["test"])
+        elif num_folds > 1:
             if not (0 <= fold_index < num_folds):
                 raise ValueError(
                     f"fold_index ({fold_index}) invalide pour num_folds={num_folds} "
@@ -232,7 +248,7 @@ class OdomolDataModule(LightningDataModule):
             else:
                 raise ValueError(
                     f"split_type non reconnu : '{self.hparams.split_type}'. "
-                    "Valeurs acceptées : 'stratified', 'scaffold'."
+                    "Valeurs acceptées : 'stratified', 'scaffold', 'benchmark'."
                 )
             log.info(
                 f"Split K-Fold [{self.hparams.split_type}, pli {fold_index + 1}/{num_folds}] -> "
@@ -340,6 +356,15 @@ class OdomolDataModule(LightningDataModule):
                 is_train=False,
                 max_atoms=max_atoms,
             )
+            if test_idx is not None:  # jeu de test tenu à l'écart (split 'benchmark')
+                self.data_test = Conformer3DUniMol2Dataset(
+                    molecules=[all_molecules[i] for i in test_idx],
+                    graph_cache=[all_graphs[i] for i in test_idx],
+                    heavy_masks=[all_heavy_masks[i] for i in test_idx],
+                    label_names=label_names,
+                    is_train=False,
+                    max_atoms=max_atoms,
+                )
         else:
             # - Train : is_train=True (20 conformères + permutation + jittering 3D)
             # - Val   : is_train=False (1 seul conformère fixe, zéro bruit, zéro permutation)
@@ -363,6 +388,14 @@ class OdomolDataModule(LightningDataModule):
                 is_train=False,
                 max_atoms=max_atoms,
             )
+            if test_idx is not None:  # jeu de test tenu à l'écart (split 'benchmark')
+                self.data_test = Conformer3DDataset(
+                    molecules=[all_molecules[i] for i in test_idx],
+                    label_names=label_names,
+                    dictionary=self.dictionary,
+                    is_train=False,
+                    max_atoms=max_atoms,
+                )
 
     def _get_collate_fn(self):
         if self._is_unimol2:
@@ -377,6 +410,14 @@ class OdomolDataModule(LightningDataModule):
             pin_memory=self.hparams.pin_memory,
             persistent_workers=(self.hparams.persistent_workers if self.hparams.num_workers > 0 else False),
             shuffle=True,
+            collate_fn=self._get_collate_fn(),
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.data_test,
+            batch_size=self.hparams.batch_size,
+            shuffle=False,
             collate_fn=self._get_collate_fn(),
         )
 

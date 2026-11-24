@@ -1,0 +1,438 @@
+\chapter{Expérimentations et résultats}
+\label{chap:Experimentations}
+
+Ce chapitre présente d'abord les outils utilisés et les développements réalisés pour mettre en œuvre la proposition du chapitre~\ref{chap:Propositions}, ainsi que les contraintes rencontrées.
+Il décrit ensuite la mise en place des expériences, leurs résultats et leur analyse.
+
+%--------------------------------------------------------------------------------
+
+\section{Outils et frameworks utilisés}
+\label{sec:Outils}
+
+Le tableau~\ref{tab:Outils} récapitule les outils utilisés.
+Le code est écrit en Python et organisé selon un modèle de projet associant PyTorch Lightning, qui structure l'apprentissage (boucles d'entraînement et de validation, points de sauvegarde, précision numérique), et Hydra, qui compose la configuration à partir de fichiers YAML.
+Chaque expérience est ainsi décrite par un unique fichier de configuration, qui ne contient que ses écarts à la configuration par défaut~; cela rend les expériences reproductibles et faciles à comparer.
+
+\begin{table}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||p{0.62\linewidth}|}
+      \hline
+      Outil & Usage \\
+      \hline
+      \hline
+      PyTorch, PyTorch Lightning & Modèle, apprentissage, calcul sur GPU \\
+      \hline
+      Hydra & Configuration composable des expériences \\
+      \hline
+      RDKit & Lecture des SMILES, génération et relaxation des conformations 3D, squelettes de Bemis-Murcko \\
+      \hline
+      \texttt{unimol\_tools} & Architecture et poids pré-entraînés d'Uni-Mol, dictionnaire des atomes \\
+      \hline
+      scikit-learn, TorchMetrics & Métriques (AUROC, AUPRC, F1, précision, rappel) \\
+      \hline
+      scikit-multilearn, iterstrat & Découpages stratifiés multi-label \\
+      \hline
+      TensorBoard & Suivi des courbes d'apprentissage \\
+      \hline
+      uv, ruff, Git & Environnement reproductible, qualité du code, gestion de versions \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Outils et bibliothèques utilisés}
+   \label{tab:Outils}
+\end{table}
+
+Les expériences ont été exécutées sur deux types de machines~: un ordinateur Apple à puce M (accélération MPS) et un poste Windows équipé d'un GPU Intel Arc (accélération XPU)~; \acompleter{modèles exacts des machines et mémoire}.
+
+%--------------------------------------------------------------------------------
+
+\section{Développement et algorithmes implémentés}
+\label{sec:Developpement}
+
+\subsection{Architecture logicielle}
+
+Le code est organisé en quatre composants, représentés sur la figure~\ref{fig:Architecture}~:
+\begin{itemize}
+   \item un \textbf{script hors ligne} qui génère les conformations de chaque molécule et les sauvegarde (algorithme~\ref{alg:Conformeres})~;
+   \item un \textbf{module de données} qui découpe le jeu de données, applique l'augmentation, encode chaque conformation au format Uni-Mol (algorithme~\ref{alg:Exemple}) et assemble les lots~;
+   \item un \textbf{module d'apprentissage} qui associe l'encodeur Uni-Mol, le décodeur, la fonction de perte, l'optimiseur et les métriques (algorithme~\ref{alg:Entrainement})~;
+   \item un \textbf{script de validation croisée} qui enchaîne les plis et calcule les métriques du protocole d'évaluation (algorithme~\ref{alg:Evaluation}).
+\end{itemize}
+
+\begin{figure}
+   \centering
+   \placeholder{schema: architecture logicielle -- script de génération des conformères, module de données (découpage, augmentation, encodage, assemblage des lots), module d'apprentissage (encodeur, décodeur, perte, métriques), script de validation croisée, configurations Hydra, TensorBoard}
+   \caption{Architecture logicielle de la chaîne d'apprentissage}
+   \label{fig:Architecture}
+\end{figure}
+
+\subsection{Génération des conformations}
+
+Les conformations sont générées une fois pour toutes, avant l'entraînement (algorithme~\ref{alg:Conformeres}).
+L'algorithme ETKDGv3 de RDKit produit jusqu'à 15 géométries compatibles avec la topologie, en écartant celles trop proches d'une géométrie déjà retenue (écart quadratique moyen inférieur à 0,25~\AA).
+Ces géométries sont ensuite relaxées par le champ de force MMFF94, qui les rapproche d'un minimum d'énergie.
+Un tiers des géométries brutes est conservé en plus des géométries relaxées.
+
+Sur les 4\,983 molécules, 4\,977 ont pu être traitées~; la génération a échoué pour 6 molécules, qui sont exclues de l'apprentissage.
+On obtient 71\,435 conformations, entre 2 et 20 par molécule (14,4 en moyenne), pour des molécules de 1 à 184 atomes, hydrogènes compris.
+
+\begin{algorithm}
+   \caption{Génération hors ligne des conformations}
+   \label{alg:Conformeres}
+   \begin{algorithmic}[1]
+      \REQUIRE jeu de données $\{(s_i, \mathbf{y}_i)\}$ (SMILES et descripteurs), $K_{\max} = 15$, seuil de diversité $\delta = 0{,}25$~\AA
+      \ENSURE pour chaque molécule, ses atomes et une liste de conformations
+      \FORALL{molécule $(s_i, \mathbf{y}_i)$}
+         \STATE $m \leftarrow$ graphe moléculaire de $s_i$, hydrogènes explicites ajoutés
+         \STATE $\mathcal{C} \leftarrow$ ETKDGv3$(m, K_{\max}, \delta)$ \COMMENT{géométries diverses}
+         \IF{$\mathcal{C} = \emptyset$}
+            \STATE $\mathcal{C} \leftarrow$ ETKDGv3 à coordonnées initiales aléatoires, sans élagage
+         \ENDIF
+         \IF{$\mathcal{C} = \emptyset$}
+            \STATE enregistrer l'échec et passer à la molécule suivante
+         \ENDIF
+         \STATE $\mathcal{C}_{\mathrm{brut}} \leftarrow$ premier tiers de $\mathcal{C}$
+         \STATE $\mathcal{C}_{\mathrm{relax}} \leftarrow$ MMFF94$(\mathcal{C})$ \COMMENT{relaxation, au plus 200 itérations}
+         \STATE sauvegarder (atomes de $m$, $\mathcal{C}_{\mathrm{brut}} \cup \mathcal{C}_{\mathrm{relax}}$, $\mathbf{y}_i$)
+      \ENDFOR
+   \end{algorithmic}
+\end{algorithm}
+
+\subsection{Préparation des exemples}
+
+À chaque appel, le module de données construit les tenseurs attendus par Uni-Mol à partir d'une conformation (algorithme~\ref{alg:Exemple}).
+Les molécules d'un lot n'ayant pas le même nombre d'atomes, les tenseurs sont complétés jusqu'à la taille de la plus grande molécule du lot par le token de remplissage \texttt{[PAD]}, ignoré par l'attention.
+
+\begin{algorithm}
+   \caption{Préparation d'un exemple au format Uni-Mol}
+   \label{alg:Exemple}
+   \begin{algorithmic}[1]
+      \REQUIRE molécule (atomes $a_1, \ldots, a_n$, conformations $\mathcal{C}$, descripteurs $\mathbf{y}$), dictionnaire de taille $V = 31$, mode (entraînement ou évaluation)
+      \ENSURE tokens, coordonnées, distances, types de paires, descripteurs
+      \IF{entraînement}
+         \STATE $\mathbf{X} \leftarrow$ conformation tirée uniformément parmi les conformations relaxées de $\mathcal{C}$
+         \STATE $s \sim \mathcal{U}([0{,}01 ; 0{,}04])$~; $\mathbf{X} \leftarrow \mathbf{X} + \boldsymbol{\varepsilon}$ avec $\boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, s^2 \mathbf{I})$
+      \ELSE
+         \STATE $\mathbf{X} \leftarrow$ dernière conformation de $\mathcal{C}$ \COMMENT{déterministe}
+      \ENDIF
+      \STATE $\mathbf{X} \leftarrow \mathbf{X} - \bar{\mathbf{X}}$ \COMMENT{centrage}
+      \STATE $\mathbf{t} \leftarrow (\texttt{[CLS]}, \mathrm{idx}(a_1), \ldots, \mathrm{idx}(a_n), \texttt{[SEP]})$
+      \STATE ajouter l'origine comme coordonnées de \texttt{[CLS]} et \texttt{[SEP]}
+      \STATE $D_{kl} \leftarrow \lVert \mathbf{x}_k - \mathbf{x}_l \rVert_2$ pour tout couple $(k, l)$
+      \STATE $E_{kl} \leftarrow t_k \times V + t_l$ pour tout couple $(k, l)$
+      \RETURN $(\mathbf{t}, \mathbf{X}, D, E, \mathbf{y})$
+   \end{algorithmic}
+\end{algorithm}
+
+\subsection{Apprentissage}
+
+L'algorithme~\ref{alg:Entrainement} décrit une époque d'apprentissage.
+Les paramètres sont répartis en deux groupes~: le décodeur, appris avec le taux $\eta$, et les couches dégelées de l'encodeur, apprises avec un taux plus faible $\eta_{\mathrm{enc}}$ afin de ne pas détruire les connaissances acquises au pré-entraînement.
+Les couches gelées sont maintenues en mode évaluation, ce qui désactive leur \emph{dropout}.
+Les gradients de 8 lots de 8 molécules sont accumulés avant chaque mise à jour, ce qui équivaut à des lots de 64 molécules sans saturer la mémoire du GPU.
+
+\begin{algorithm}
+   \caption{Une époque d'apprentissage}
+   \label{alg:Entrainement}
+   \begin{algorithmic}[1]
+      \REQUIRE encodeur $g_\phi$ dont les $u$ dernières couches sont dégelées, décodeur $h_\theta$, taux $\eta$ et $\eta_{\mathrm{enc}}$, accumulation $A = 8$
+      \ENSURE paramètres mis à jour, métriques de validation
+      \STATE couches gelées de $g_\phi$ en mode évaluation~; couches dégelées et $h_\theta$ en mode entraînement
+      \FORALL{lot $b$ de l'ensemble d'entraînement (algorithme~\ref{alg:Exemple})}
+         \STATE $\mathbf{z} \leftarrow h_\theta(g_\phi(b))$ \COMMENT{logits, $|b| \times 138$}
+         \STATE $\ell \leftarrow \mathcal{L}_{\mathrm{ASL}}(\mathbf{z}, \mathbf{y}_b) / A$ \COMMENT{équation~\ref{eq:ASL}}
+         \STATE rétropropager $\ell$
+         \IF{$A$ lots ont été accumulés}
+            \STATE écrêter la norme du gradient à 1
+            \STATE mise à jour AdamW~: $\theta$ avec le taux $\eta$, couches dégelées de $\phi$ avec $\eta_{\mathrm{enc}}$
+            \STATE remettre les gradients à zéro
+         \ENDIF
+      \ENDFOR
+      \STATE ajuster $\eta$ et $\eta_{\mathrm{enc}}$ selon la décroissance cosinus
+      \STATE prédire l'ensemble de validation~; calculer AUROC et F1 macro
+      \STATE sauvegarder le modèle si la métrique surveillée s'améliore
+   \end{algorithmic}
+\end{algorithm}
+
+\subsection{Protocole d'évaluation}
+
+Le protocole de la section~\ref{sec:Formalisation} est implémenté en deux temps.
+Un script calcule une fois pour toutes le découpage (1\,007 molécules de test, 3\,976 d'entraînement réparties en cinq plis) et l'enregistre dans un fichier, ce qui garantit que tous les modèles sont évalués sur les mêmes molécules.
+Le script de validation croisée applique ensuite l'algorithme~\ref{alg:Evaluation}.
+
+\begin{algorithm}
+   \caption{Protocole d'évaluation (d'après \cite{Han-2026})}
+   \label{alg:Evaluation}
+   \begin{algorithmic}[1]
+      \REQUIRE jeu de données GS-LF, nombre de plis $P = 5$, nombre de tirages $B = 1\,000$
+      \ENSURE métriques macro sur le test et intervalles de confiance à 95~\%
+      \STATE $(\mathcal{D}_{\mathrm{train}}, \mathcal{D}_{\mathrm{test}}) \leftarrow$ stratification itérative d'ordre 2 (80~\% / 20~\%)
+      \STATE $(F_1, \ldots, F_P) \leftarrow$ stratification itérative d'ordre 2 de $\mathcal{D}_{\mathrm{train}}$
+      \FOR{$k = 1$ \TO $P$}
+         \STATE entraîner $f_k$ sur $\mathcal{D}_{\mathrm{train}} \setminus F_k$, en retenant l'époque de meilleure AUROC sur $F_k$
+         \STATE $\hat{\mathbf{p}}^{\mathrm{oof}}_i \leftarrow f_k(m_i)$ pour tout $m_i \in F_k$
+         \STATE $\hat{\mathbf{p}}^{(k)}_i \leftarrow f_k(m_i)$ pour tout $m_i \in \mathcal{D}_{\mathrm{test}}$
+      \ENDFOR
+      \FOR{$j = 1$ \TO $138$}
+         \STATE $\tau_j \leftarrow$ seuil maximisant le F1 du descripteur $j$ sur $\hat{\mathbf{p}}^{\mathrm{oof}}$ \COMMENT{équation~\ref{eq:Seuils}}
+      \ENDFOR
+      \STATE $\hat{\mathbf{p}}_i \leftarrow \frac{1}{P} \sum_{k} \hat{\mathbf{p}}^{(k)}_i$ pour tout $m_i \in \mathcal{D}_{\mathrm{test}}$ \COMMENT{ensemble}
+      \STATE $M \leftarrow$ métriques macro de $(\hat{\mathbf{p}}, \boldsymbol{\tau})$ sur $\mathcal{D}_{\mathrm{test}}$
+      \FOR{$b = 1$ \TO $B$}
+         \STATE $M_b \leftarrow$ métriques macro sur un rééchantillonnage avec remise de $\mathcal{D}_{\mathrm{test}}$
+      \ENDFOR
+      \RETURN $M$ et les percentiles 2,5 et 97,5 des $M_b$
+   \end{algorithmic}
+\end{algorithm}
+
+\subsection{Contraintes rencontrées}
+
+\subsubsection{Contraintes liées à la proposition}
+
+L'encodage d'entrée doit reproduire \emph{exactement} celui utilisé au pré-entraînement~: le modèle n'a appris à interpréter que celui-là.
+Or rien ne signale une erreur d'encodage~: le modèle s'entraîne normalement, mais sur des entrées qu'il interprète mal.
+Trois écarts ont ainsi été détectés et corrigés au début de novembre~:
+\begin{itemize}
+   \item le dictionnaire de la bibliothèque \texttt{unimol\_\allowbreak tools} ne contient pas le token \texttt{[MASK]}, ajouté au pré-entraînement~; sans lui, le vocabulaire compte 30 entrées au lieu de 31, et les types de paires $t_k \times V + t_l$ ne correspondent plus à ceux appris~;
+   \item les distances entre le token \texttt{[CLS]} et les atomes n'étaient pas calculées comme au pré-entraînement~;
+   \item les couches gelées de l'encodeur restaient en mode entraînement, ce qui laissait leur \emph{dropout} actif et bruitait la représentation.
+\end{itemize}
+Les expériences antérieures à ces corrections (8 à 15) en ont été affectées.
+
+\subsubsection{Contraintes liées au développement}
+
+\paragraph{Matériel hétérogène.}
+L'utilisation d'un GPU Intel Arc sous Windows a nécessité plusieurs contournements dans les pilotes~: transferts mémoire synchrones (des transferts asynchrones corrompaient les étiquettes), désactivation des noyaux vectorisés de l'optimiseur et de l'écrêtage du gradient, et synchronisations explicites entre la propagation et la mise à jour.
+Le code isole ces adaptations dans un module dédié, afin de fonctionner indifféremment sur CUDA, MPS, XPU et CPU.
+
+\paragraph{Coût de calcul.}
+L'encodage à la volée et l'augmentation empêchent de précalculer les représentations, et le dégel de couches impose de rétropropager à travers l'encodeur.
+La durée des expériences (\acompleter{durées mesurées par époque et par expérience}) a limité leur nombre et interdit, à ce stade, une recherche systématique d'hyperparamètres.
+
+%--------------------------------------------------------------------------------
+
+\section{Mise en place des expérimentations}
+\label{sec:MiseEnPlace}
+
+\paragraph{Démarche.}
+Les expériences ont été conduites de manière incrémentale~: chacune modifie un élément de la précédente pour en mesurer l'effet, et est consignée avec son fichier de configuration, ses courbes et un commentaire.
+Les expériences 11 et 12 sont des ablations, qui retirent un élément pour vérifier son utilité.
+
+\paragraph{Évaluation interne.}
+Avant l'implémentation du protocole de la section~\ref{sec:Formalisation}, les modèles ont été évalués sur un unique découpage, au niveau des molécules (aucune conformation d'une molécule d'entraînement n'est en validation)~:
+\begin{itemize}
+   \item expériences 1 à 7~: découpage aléatoire 80~/~10~/~10~;
+   \item expériences 8 à 17~: découpage stratifié multi-label 80~/~20, sauf l'expérience 10 qui regroupe les molécules par squelette de Bemis-Murcko, afin qu'aucune famille chimique ne soit à la fois en entraînement et en validation.
+\end{itemize}
+Les métriques suivantes sont calculées sur la validation à chaque époque~:
+\begin{itemize}
+   \item l'AUROC macro, indépendante de tout seuil~;
+   \item le F1 macro au seuil de 0,5~;
+   \item à partir de l'expérience 9, le F1 macro au meilleur seuil \emph{global}, choisi parmi 19 valeurs entre 0,05 et 0,95~;
+   \item à partir de l'expérience 14, le F1 micro au meilleur seuil global, et à partir de l'expérience 16, le F1 macro avec un seuil optimal \emph{par descripteur}.
+\end{itemize}
+Les valeurs rapportées sont les meilleures valeurs atteintes au fil des époques.
+
+\paragraph{Configuration retenue.}
+Le tableau~\ref{tab:Hyperparametres} donne la configuration de la meilleure expérience (17) et celle préparée pour le protocole d'évaluation.
+
+\begin{table}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||c|c|}
+      \hline
+      Paramètre & Expérience 17 & Protocole d'évaluation \\
+      \hline
+      \hline
+      Encodeur & \multicolumn{2}{c|}{Uni-Mol v1, 2 dernières couches dégelées} \\
+      \hline
+      Décodeur & \multicolumn{2}{c|}{$512 \rightarrow 256 \rightarrow 138$, \emph{dropout} 0,4} \\
+      \hline
+      Perte & \multicolumn{2}{c|}{ASL, $\gamma_- = 2$, $\gamma_+ = 0$, $c = 0{,}05$} \\
+      \hline
+      Optimiseur & \multicolumn{2}{c|}{AdamW, $\eta = 10^{-3}$, pénalité 0,05} \\
+      \hline
+      Taux de l'encodeur $\eta_{\mathrm{enc}}$ & $10^{-4}$ & $7 \cdot 10^{-5}$ \\
+      \hline
+      Ordonnanceur & \multicolumn{2}{c|}{décroissance cosinus jusqu'à $10^{-6}$} \\
+      \hline
+      Époques & 120 & 65 \\
+      \hline
+      Lots & \multicolumn{2}{c|}{8 molécules, 8 lots accumulés (64)} \\
+      \hline
+      Augmentation & \multicolumn{2}{c|}{tirage de conformation, bruit $s \in [0{,}01 ; 0{,}04]$~\AA} \\
+      \hline
+      Sélection du modèle & F1 de validation & AUROC de validation \\
+      \hline
+      Découpage & stratifié 80~/~20 & test 20~\% + 5 plis \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Hyperparamètres de la meilleure expérience et du protocole d'évaluation}
+   \label{tab:Hyperparametres}
+\end{table}
+
+%--------------------------------------------------------------------------------
+
+\section{Résultats des expérimentations}
+\label{sec:Resultats}
+
+\subsection{Expériences successives}
+
+Le tableau~\ref{tab:Experiences} présente les résultats des dix-sept expériences, extraits des journaux TensorBoard.
+Les figures~\ref{fig:CourbesF1} et~\ref{fig:CourbesPerte} montrent les courbes d'apprentissage de la meilleure expérience.
+
+\begin{table*}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|c|l||c|c|c|}
+      \hline
+      N\textsuperscript{o} & Modification & F1 (0,5) & F1 (seuil opt.) & AUROC \\
+      \hline
+      \hline
+      \multicolumn{5}{|l|}{\emph{Représentations Uni-Mol figées, découpage aléatoire 80/10/10}} \\
+      \hline
+      1 & Première version~: décodeur MLP, entropie croisée & 0,205 & -- & 0,839 \\
+      2 & Entropie croisée pondérée & 0,258 & -- & 0,834 \\
+      3 & Ordonnanceur à plateau & 0,262 & -- & 0,834 \\
+      4 & AdamW, pénalité 0,01 & 0,262 & -- & 0,835 \\
+      5 & AdamW, pénalité 0,05 & 0,261 & -- & 0,835 \\
+      6 & \emph{Dropout} 0,5 & 0,261 & -- & 0,837 \\
+      7 & Décroissance cosinus & 0,273 & -- & 0,837 \\
+      \hline
+      \multicolumn{5}{|l|}{\emph{Conformations 3D, encodeur gelé, découpage stratifié 80/20}} \\
+      \hline
+      8 & Conformations 3D et augmentation & 0,215 & -- & 0,847 \\
+      9 & Seuil global optimisé & 0,209 & 0,232 & 0,844 \\
+      10 & Découpage par squelettes & 0,196 & 0,209 & 0,844 \\
+      11 & Sans augmentation dynamique & 0,211 & 0,234 & 0,844 \\
+      12 & Sans ordonnanceur & 0,204 & 0,225 & 0,839 \\
+      13 & Décodeur à 3 couches & 0,201 & 0,212 & 0,841 \\
+      14 & Perte asymétrique, 300 époques & 0,249 & 0,272 & 0,857 \\
+      15 & Perte asymétrique, 1\,000 époques & 0,257 & 0,288 & 0,859 \\
+      \hline
+      \multicolumn{5}{|l|}{\emph{Encodage corrigé}} \\
+      \hline
+      16 & Corrections de l'encodage, ASL réglée & 0,313 & 0,313 & 0,864 \\
+      17 & Augmentation et dégel des 2 dernières couches & \textbf{0,354} & \textbf{0,354} & \textbf{0,872} \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Résultats des expériences sur la validation (F1 et AUROC macro, meilleure valeur au fil des époques)}
+   \label{tab:Experiences}
+\end{table*}
+
+Pour les deux dernières expériences, les métriques complémentaires sont les suivantes~:
+\begin{itemize}
+   \item expérience 16~: F1 macro avec seuils par descripteur de 0,374, F1 micro de 0,459~;
+   \item expérience 17~: F1 macro avec seuils par descripteur de 0,400, F1 micro de 0,481.
+\end{itemize}
+Dans l'expérience 17, la meilleure AUROC (0,872) est atteinte à la 22\textsuperscript{e} époque et le meilleur F1 (0,354) à la 58\textsuperscript{e}~; la perte de validation est minimale dès la 15\textsuperscript{e} époque, puis remonte.
+
+\begin{figure}
+   \centering
+   \placeholder{image: courbes TensorBoard de l'expérience 17 -- F1 macro et AUROC macro de validation en fonction des époques}
+   \caption{Évolution du F1 et de l'AUROC de validation (expérience 17)}
+   \label{fig:CourbesF1}
+\end{figure}
+
+\begin{figure}
+   \centering
+   \placeholder{image: courbes TensorBoard de l'expérience 17 -- perte d'entraînement et perte de validation, minimum de la validation vers l'époque 15}
+   \caption{Pertes d'entraînement et de validation (expérience 17)}
+   \label{fig:CourbesPerte}
+\end{figure}
+
+\begin{figure}
+   \centering
+   \placeholder{schema: progression du F1 macro et de l'AUROC au fil des 17 expériences, avec les trois phases (représentations figées, conformations 3D, encodage corrigé)}
+   \caption{Progression des performances au fil des expériences}
+   \label{fig:Progression}
+\end{figure}
+
+\subsection{Protocole d'évaluation de référence}
+
+Le protocole d'évaluation de la section~\ref{sec:Formalisation} est implémenté et testé sur des découpages réduits, mais n'a pas encore été exécuté sur le jeu complet.
+Le tableau~\ref{tab:Benchmark} est prévu pour accueillir ses résultats, à côté de ceux de la littérature.
+
+\begin{table}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||c|c|c|c|c|}
+      \hline
+      Modèle & AUROC & AUPRC & F1 & Précision & Rappel \\
+      \hline
+      \hline
+      OpenPOM \cite{Han-2026} & 0,888 & 0,375 & 0,375 & 0,406 & 0,405 \\
+      \hline
+      Uni-Mol2 ajusté \cite{Han-2026} & 0,899 & 0,408 & 0,399 & 0,429 & 0,429 \\
+      \hline
+      Notre modèle (Uni-Mol v1) & \multicolumn{5}{c|}{\acompleter{résultats et IC 95~\% du protocole}} \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Comparaison sur le test de GS-LF selon le protocole de \cite{Han-2026}}
+   \label{tab:Benchmark}
+\end{table}
+
+%--------------------------------------------------------------------------------
+
+\section{Analyse des résultats}
+\label{sec:Analyse}
+
+\subsection{Effet des choix successifs}
+
+\paragraph{Représentations figées (expériences 1 à 7).}
+Sans pondération, le modèle prédit très peu de descripteurs et obtient un F1 faible (0,205).
+La pondération des positifs a le plus fort effet (0,258)~; la régularisation (AdamW, \emph{dropout}) et l'ordonnanceur cosinus apportent ensuite de petits gains, jusqu'à 0,273.
+Le surapprentissage reste marqué~: la perte de validation est minimale dès les premières époques.
+Une représentation figée, calculée une fois par molécule, ne permet pas d'augmenter les données.
+
+\paragraph{Conformations 3D (expériences 8 à 15).}
+Le passage aux conformations et à l'augmentation élimine le surapprentissage et améliore l'AUROC (0,847), mais le F1 au seuil de 0,5 baisse.
+Ces deux mesures ne sont toutefois pas directement comparables, la validation ayant changé (découpage 80/20 stratifié au lieu de 80/10/10 aléatoire).
+Le seuil de 0,5 est par ailleurs inadapté à des descripteurs rares~: l'optimiser apporte environ deux points de F1.
+Le découpage par squelettes fait perdre environ 2 points, ce qui indique une part de mémorisation des familles chimiques.
+L'augmentation dynamique, l'ordonnanceur et un décodeur plus profond n'apportent pas de gain mesurable dans cette configuration.
+La perte asymétrique apporte le gain le plus net de cette phase~: l'AUROC passe à 0,857 et le F1 à seuil optimisé à 0,272, puis 0,288 avec un entraînement plus long.
+
+\paragraph{Encodage corrigé (expériences 16 et 17).}
+La correction de l'encodage, combinée à un réglage de la perte asymétrique, porte le F1 à 0,313 en 66 époques, contre 0,288 en 800 époques auparavant.
+Ces deux changements ayant été faits ensemble, leurs effets respectifs ne peuvent pas être séparés~; la rapidité de convergence suggère toutefois que l'encodage incorrect pénalisait fortement les expériences précédentes.
+Avec l'encodeur gelé, le F1 plafonne~: c'est le dégel des deux dernières couches, avec l'augmentation, qui le porte à 0,354 et l'AUROC à 0,872.
+En contrepartie, les 6,3 millions de paramètres dégelés provoquent un surapprentissage précoce~: la perte de validation remonte après la 15\textsuperscript{e} époque, alors que le F1 continue de progresser jusqu'à la 58\textsuperscript{e}.
+
+\subsection{Comparaison avec la littérature}
+
+Le F1 macro de 0,354 de l'expérience 17 est proche de celui de POM (0,360) et d'OpenPOM (0,375).
+La comparaison n'est cependant pas valide en l'état, pour quatre raisons~:
+\begin{enumerate}
+   \item nos métriques sont mesurées sur la validation, qui sert aussi à choisir l'époque, et non sur un test tenu à l'écart~;
+   \item nous rapportons la meilleure valeur au fil des époques, ce qui est optimiste~;
+   \item le F1 avec seuils par descripteur (0,400) est encore plus optimiste, les seuils étant choisis sur les données mêmes où il est mesuré~; dans le protocole de référence, ils sont choisis sur les prédictions hors pli puis appliqués au test~;
+   \item les modèles de référence sont des ensembles (50 modèles pour Uni-Mol2), un unique découpage ne permet pas d'estimer l'incertitude, et notre validation (environ 1\,000 molécules) n'est pas celle de leur test.
+\end{enumerate}
+
+À l'inverse, nos résultats sont obtenus avec Uni-Mol v1 et sans recherche d'hyperparamètres~; ils pourraient donc progresser.
+Enfin, il faut distinguer F1 macro et F1 micro~: le F1 micro, dominé par les descripteurs fréquents, atteint 0,481, mais c'est le F1 macro que publie la littérature.
+Seule l'exécution du protocole (tableau~\ref{tab:Benchmark}) permettra de conclure.
+
+\subsection{Limites des expériences}
+
+Chaque expérience ne correspond qu'à une exécution, avec une graine aléatoire fixe~: les écarts de l'ordre du point de F1 ne sont pas significatifs.
+Plusieurs expériences modifient plus d'un paramètre à la fois.
+Les expériences 8 à 15 ont été menées avec un encodage incorrect, et leurs conclusions (inutilité de l'augmentation dynamique, du décodeur profond) mériteraient d'être revérifiées avec l'encodage corrigé.
+
+%--------------------------------------------------------------------------------
+
+\section{Conclusion}
+\label{sec:ConclusionExperimentations}
+
+La chaîne développée est fonctionnelle et a permis de doubler presque le F1 macro de validation, de 0,205 à 0,354, et de porter l'AUROC à 0,872.
+Les choix les plus déterminants ont été le traitement du déséquilibre (pondération puis perte asymétrique), la conformité de l'encodage des entrées à celui du pré-entraînement et l'ajustement fin des dernières couches de l'encodeur.
+Ce dernier introduit un surapprentissage précoce, qu'il faudra maîtriser.
+
+Le principal enseignement méthodologique est que nos premières mesures n'étaient pas comparables à la littérature.
+Le protocole de référence est désormais implémenté~; son exécution est la première étape de la phase~II.
+Pour un repreneur, nous recommandons de vérifier l'encodage des entrées d'un modèle pré-entraîné avant toute expérience, et de fixer le protocole d'évaluation dès le début du projet.

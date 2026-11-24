@@ -1,0 +1,270 @@
+\chapter{\'Etat de l'art}
+\label{chap:EtatArt}
+
+Ce chapitre fait le point, à notre connaissance, sur les travaux utiles à la prédiction des descripteurs olfactifs à partir de la structure moléculaire.
+
+Une molécule peut être représentée de plusieurs façons~: par une chaîne de caractères (code SMILES), par des descripteurs physico-chimiques ou des empreintes moléculaires (\emph{fingerprints}) calculés par des logiciels de chimie, par un graphe dont les sommets sont les atomes et les arêtes les liaisons, ou par la géométrie 3D de l'une de ses conformations.
+Les modèles d'apprentissage profond récents opèrent principalement sur les deux dernières représentations.
+
+Nous avons retenu trois familles de travaux~:
+\begin{itemize}
+   \item les GNN de référence en olfaction, QSOR, POM et sa réimplémentation ouverte OpenPOM, qui définissent l'état de l'art sur le jeu GS-LF et que le sujet désigne comme \emph{baselines} (section~\ref{sec:EAPom})~;
+   \item le transformeur de graphes 3D Uni-Mol et sa seconde version Uni-Mol2, cœur du sujet (section~\ref{sec:EAUniMol})~;
+   \item un travail récent qui applique Uni-Mol2 à l'olfaction sur le même jeu de données et dont le protocole d'évaluation sert de référence à nos mesures (section~\ref{sec:EAHan}).
+\end{itemize}
+
+D'autres transformeurs de graphes appliqués à l'olfaction ou aux propriétés moléculaires ont été identifiés, notamment GraphNOSE \cite{Sharma-2026} et une représentation à double graphe \cite{Zhang-2026}.
+Leur étude détaillée est prévue en phase~II.
+Les notions générales d'apprentissage profond (perceptron multicouche, rétropropagation, mécanisme d'attention \cite{Vaswani-2017}) sont supposées connues du lecteur.
+
+%--------------------------------------------------------------------------------
+
+\section{Les GNN de référence en olfaction~: POM et OpenPOM}
+\label{sec:EAPom}
+
+\subsection{Présentation}
+
+\paragraph{QSOR.}
+Sanchez-Lengeling et al. \cite{SanchezLengeling-2019} ont été les premiers à aborder la prédiction des odeurs comme une tâche de classification multi-label à grande échelle par apprentissage profond.
+Ils assemblent environ 5\,000 molécules issues de deux catalogues de parfumerie, GoodScents et Leffingwell, annotées avec 138 descripteurs, et entraînent un GNN par propagation de messages directement sur le graphe moléculaire.
+Le GNN surpasse les approches classiques fondées sur des empreintes moléculaires ou des descripteurs chimiques, et la représentation qu'il apprend (son \emph{embedding}) organise les molécules selon leurs odeurs~: elle se transfère à d'autres tâches olfactives.
+
+\paragraph{POM.}
+Lee et al. \cite{Lee-2023} prolongent ce travail avec la \emph{Principal Odor Map} (POM).
+Le modèle est un GNN entraîné sur la fusion nettoyée de GoodScents et Leffingwell, appelée GS-LF~: c'est le jeu de données utilisé dans ce rapport.
+La couche cachée du réseau définit une <<~carte des odeurs~>> dans laquelle des molécules aux odeurs proches sont proches.
+Les auteurs valident le modèle de manière prospective~: sur environ 400 molécules nouvelles évaluées par un panel humain entraîné, ses prédictions sont, pour une majorité des molécules, plus proches du consensus du panel que celles d'un panéliste médian.
+Le modèle est un ensemble de réseaux dont les hyperparamètres ont été choisis par une recherche de 500 essais en validation croisée.
+
+\paragraph{OpenPOM.}
+Le code et les poids de POM n'étant pas publiés, le groupe BioMachineLearning en a proposé une réimplémentation ouverte, OpenPOM\footnote{BioMachineLearning, \emph{OpenPOM}, \url{https://github.com/BioMachineLearning/openpom}}, fondée sur la bibliothèque DeepChem.
+OpenPOM fournit le jeu GS-LF nettoyé (4\,983 molécules, 138 descripteurs), un réseau à propagation de messages et un découpage des données par stratification itérative multi-label d'ordre~2.
+C'est aujourd'hui le point de comparaison reproductible de référence pour la tâche.
+Ses performances sur le test de GS-LF, mesurées par \cite{Han-2026}, sont rapportées dans le tableau~\ref{tab:ResultatsLitterature}.
+
+\begin{figure}
+   \centering
+   \placeholder{schema: GNN par propagation de messages -- molécule en graphe, agrégation des voisins sur K couches, lecture globale, MLP, 138 sorties~; mettre en évidence le voisinage limité à K liaisons}
+   \caption{Principe d'un GNN par propagation de messages appliqué à une molécule}
+   \label{fig:GNN}
+\end{figure}
+
+\subsection{Analyse}
+
+\subsubsection{Intérêts des propositions}
+
+Ces travaux établissent le cadre de notre problème~: la formulation multi-label sur 138 descripteurs, le jeu de données GS-LF, les métriques (AUROC et F1 macro) et des résultats de référence.
+La validation prospective de POM montre qu'un modèle appris peut approcher la performance d'un expert humain, ce qui justifie l'intérêt applicatif du sujet.
+Enfin, OpenPOM fournit les données nettoyées et le découpage, que nous réutilisons~: notre fichier de données est identique au fichier GS-LF d'OpenPOM.
+
+\subsubsection{Limites des propositions}
+
+La propagation de messages agrège à chaque couche l'information des voisins immédiats d'un atome~: avec $K$ couches, un atome ne <<~voit~>> que les atomes situés à au plus $K$ liaisons.
+Les interactions entre atomes éloignés sont donc mal captées.
+Surtout, ces modèles n'utilisent que le graphe 2D~: ils ignorent la géométrie de la molécule et, en particulier, sa stéréochimie.
+Deux énantiomères, molécules images l'une de l'autre dans un miroir, ont le même graphe et reçoivent nécessairement la même prédiction, alors que leurs odeurs peuvent différer.
+Enfin, ces modèles sont entraînés à partir de zéro sur environ 5\,000 molécules, sans bénéficier de connaissances chimiques plus générales.
+
+%--------------------------------------------------------------------------------
+
+\section{Les transformeurs moléculaires 3D~: Uni-Mol et Uni-Mol2}
+\label{sec:EAUniMol}
+
+\subsection{Présentation}
+
+\paragraph{Uni-Mol.}
+Uni-Mol \cite{Zhou-2023} est un transformeur qui prend en entrée une molécule sous forme 3D~: la liste de ses atomes et leurs coordonnées dans une conformation donnée.
+Chaque atome est un \emph{token}, comme un mot dans une phrase, et un token spécial \texttt{[CLS]} est ajouté pour résumer la molécule entière.
+La géométrie est encodée par une \emph{représentation de paires}~: pour chaque couple d'atomes $(i, j)$, la distance euclidienne $d_{ij}$ est projetée sur une base de noyaux gaussiens, dont les paramètres dépendent du type de la paire.
+Cette représentation de paires est ajoutée comme biais aux scores d'attention et mise à jour à chaque couche.
+L'attention étant globale, chaque atome interagit avec tous les autres dès la première couche, quelle que soit leur distance dans le graphe.
+Comme seules les distances interviennent, la représentation est invariante par rotation et par translation de la molécule.
+
+Le modèle (15 couches, dimension 512, 64 têtes d'attention, environ 47 millions de paramètres) est pré-entraîné de manière auto-supervisée sur 19 millions de molécules et plus de 200 millions de conformations, avec deux tâches~: retrouver des atomes masqués et débruiter des coordonnées perturbées.
+Il est ensuite ajusté (\emph{fine-tuning}) sur des tâches de prédiction de propriétés, où il obtient de très bons résultats.
+Une bibliothèque, \texttt{unimol\_tools}, fournit les poids pré-entraînés et les outils de préparation des données.
+
+\paragraph{Uni-Mol2.}
+Uni-Mol2 \cite{Ji-2024} étudie le passage à l'échelle de cette approche.
+Le jeu de pré-entraînement est porté à environ 884 millions de molécules (73 millions de squelettes moléculaires distincts), et des modèles de 84 millions à 1,1 milliard de paramètres sont entraînés.
+L'architecture devient un transformeur <<~à deux pistes~>> qui met à jour conjointement une représentation des atomes et une représentation des paires.
+Les paires combinent désormais la géométrie (distances encodées par noyaux gaussiens) et la topologie (type de liaison et plus court chemin dans le graphe).
+Les auteurs établissent une loi d'échelle~: la perte de validation décroît en loi de puissance avec la taille du modèle, la quantité de données et le calcul, et les performances sur les tâches en aval progressent avec la taille.
+
+\begin{figure}
+   \centering
+   \placeholder{schema: architecture Uni-Mol -- atomes + [CLS] en tokens, distances en noyaux gaussiens, représentation de paires utilisée comme biais d'attention, 15 couches, sortie [CLS] de dimension 512}
+   \caption{Architecture du transformeur Uni-Mol (d'après \cite{Zhou-2023})}
+   \label{fig:UniMol}
+\end{figure}
+
+\subsection{Analyse}
+
+\subsubsection{Intérêts des propositions}
+
+Uni-Mol répond directement aux deux limites des GNN identifiées précédemment.
+L'attention globale supprime la myopie de la propagation de messages, et la représentation de paires intègre la géométrie, qui conditionne l'interaction d'une molécule odorante avec les récepteurs olfactifs.
+Le pré-entraînement sur des centaines de millions de conformations apporte une connaissance chimique générale, précieuse lorsque la tâche cible ne compte que 5\,000 molécules~: c'est le principe de l'apprentissage par transfert.
+Enfin, les poids et le code sont publics, et la bibliothèque \texttt{unimol\_tools} rend la version~1 directement utilisable.
+Uni-Mol2 est la cible désignée par le sujet~; sa représentation de paires, qui combine géométrie et topologie, devrait mieux exploiter la structure moléculaire.
+
+\subsubsection{Limites des propositions}
+
+\paragraph{Dépendance aux conformères.}
+Le modèle requiert des coordonnées 3D, qu'il faut générer (ici avec RDKit).
+Une molécule flexible possède de nombreuses conformations~; le choix de celle qui est présentée au modèle est arbitraire et introduit une variabilité.
+La génération peut aussi échouer~: c'est le cas de 6 molécules de GS-LF.
+
+\paragraph{Invariance par réflexion.}
+Une matrice de distances est inchangée par une symétrie miroir.
+Deux énantiomères ont donc exactement les mêmes distances interatomiques~: Uni-Mol ne peut pas les distinguer.
+Il ne distingue que les stéréoisomères dont les distances diffèrent, comme les diastéréoisomères.
+Uni-Mol2 utilise les mêmes distances, complétées par des informations topologiques~: il semble partager cette limite, ce qui reste à vérifier expérimentalement.
+
+\paragraph{Écart de domaine et coût.}
+Les molécules du pré-entraînement proviennent de bases de chimie médicinale et commerciale (ZINC, ChEMBL), dont la distribution diffère de celle des petites molécules odorantes.
+Enfin, ces modèles sont nettement plus coûteux que les GNN~: l'attention est quadratique en nombre d'atomes, et Uni-Mol2 compte au moins 84 millions de paramètres.
+
+%--------------------------------------------------------------------------------
+
+\section{Uni-Mol2 appliqué à l'olfaction}
+\label{sec:EAHan}
+
+\subsection{Présentation}
+
+Han et al. \cite{Han-2026} étudient si un modèle de fondation moléculaire généraliste, ajusté une seule fois sur une tâche olfactive, apprend une représentation transférable à d'autres tâches olfactives.
+Ils ajustent Uni-Mol2 (version 84M, la version 164M n'apportant pas de gain à budget égal) sur GS-LF avec une perte focale, et le comparent à POM et OpenPOM.
+
+\paragraph{Protocole d'évaluation.}
+Le protocole est explicitement aligné sur celui de POM, afin de permettre une comparaison équitable (figure~\ref{fig:ProtocoleHan})~:
+\begin{enumerate}
+   \item environ 20~\% de GS-LF est tenu à l'écart comme ensemble de test, par stratification itérative multi-label~;
+   \item une recherche d'hyperparamètres de 50 essais est menée en validation croisée à cinq plis sur le reste~; les 10 meilleures configurations selon l'AUROC de validation sont retenues, soit $10 \times 5 = 50$ modèles~;
+   \item un seuil de décision est choisi pour chaque descripteur, en maximisant son F1 sur les prédictions \emph{hors pli} (\emph{out-of-fold})~: chaque molécule d'entraînement est prédite par le modèle qui ne l'a pas vue~;
+   \item sur le test, les probabilités des 50 modèles sont moyennées, puis binarisées avec ces seuils~;
+   \item les métriques sont des moyennes macro (AUROC, AUPRC, F1, précision, rappel), accompagnées d'intervalles de confiance à 95~\% calculés par 1\,000 rééchantillonnages \emph{bootstrap} du test.
+\end{enumerate}
+
+\paragraph{Résultats.}
+Sur le test de GS-LF, Uni-Mol2 ajusté dépasse les deux modèles de référence sur les cinq métriques (tableau~\ref{tab:ResultatsLitterature}), avec des écarts modestes et des intervalles de confiance qui se chevauchent.
+Les auteurs évaluent ensuite le modèle, sans nouvel entraînement, sur d'autres tâches~: des paires d'énantiomères, un autre jeu de descripteurs, la distinction entre molécules odorantes et inodores, et la discriminabilité de mélanges d'odeurs.
+Sur les énantiomères, OpenPOM donne des prédictions strictement identiques aux deux molécules de chaque paire, tandis qu'Uni-Mol2 les différencie~; mais il n'attribue la bonne odeur au bon énantiomère que dans 19 cas sur 34, à peine mieux que le hasard.
+Enfin, l'analyse des erreurs montre que les descripteurs confondus par le modèle sont ceux qui apparaissent souvent ensemble, ce qui conduit les auteurs à suggérer de modéliser conjointement molécules et descripteurs.
+
+\begin{table}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||c|c|c|c|c|}
+      \hline
+      Modèle & AUROC & AUPRC & F1 & Précision & Rappel \\
+      \hline
+      \hline
+      POM (chiffres publiés) & 0,894 & -- & 0,360 & 0,379 & -- \\
+      \hline
+      OpenPOM & 0,888 & 0,375 & 0,375 & 0,406 & 0,405 \\
+      \hline
+      Uni-Mol2 ajusté & \textbf{0,899} & \textbf{0,408} & \textbf{0,399} & \textbf{0,429} & \textbf{0,429} \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Performances sur le test de GS-LF, moyennes macro sur 138 descripteurs (source~: \cite{Han-2026})}
+   \label{tab:ResultatsLitterature}
+\end{table}
+
+\begin{figure}
+   \centering
+   \placeholder{schema: protocole d'évaluation de Han et al. -- GS-LF, découpage 80/20 stratifié, validation croisée 5 plis, prédictions hors pli, seuils par descripteur, moyenne des modèles sur le test, bootstrap}
+   \caption{Protocole d'évaluation de \cite{Han-2026}, repris de POM}
+   \label{fig:ProtocoleHan}
+\end{figure}
+
+\subsection{Analyse}
+
+\subsubsection{Intérêts de la proposition}
+
+Ce travail est le plus proche du nôtre~: il utilise le modèle visé par le sujet, sur le même jeu de données, et le compare aux mêmes références.
+Il apporte un résultat de référence pour un transformeur 3D sur GS-LF et, surtout, un protocole d'évaluation précis.
+Il montre aussi que les performances absolues restent modestes~: un F1 macro autour de 0,40 constitue l'état de l'art, ce qui fixe des attentes réalistes pour notre propre travail.
+Enfin, son expérience sur les énantiomères et son analyse des confusions entre descripteurs nourrissent directement nos perspectives.
+
+\subsubsection{Limites de la proposition}
+
+Plusieurs détails nécessaires à la reproduction ne sont pas donnés~: taux d'apprentissage, nombre d'époques, couches dégelées, taille des lots, architecture de la tête de classification et paramètres de la perte focale.
+Le code n'était pas accessible au moment de notre lecture.
+Le gain sur GS-LF est faible au regard des intervalles de confiance, et l'ensemble de 50 modèles rend la comparaison coûteuse à reproduire.
+Enfin, GS-LF ne contenant aucune information stéréochimique, le modèle n'a jamais pu apprendre quel énantiomère sent quoi~: le résultat proche du hasard sur les énantiomères était prévisible.
+
+%--------------------------------------------------------------------------------
+
+\section{Récapitulatif}
+\label{sec:Recapitulatif}
+
+Le tableau~\ref{tab:Comparatif} résume les avantages et inconvénients de chaque famille de travaux, et le tableau~\ref{tab:ComparatifAlternatif} les compare selon les critères qui comptent pour notre problème.
+
+\begin{table}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||p{0.36\linewidth}|p{0.36\linewidth}|}
+      \hline
+      Proposition & Avantages & Inconvénients \\
+      \hline
+      \hline
+      POM / OpenPOM & Référence de la tâche, validation prospective, code et données ouverts (OpenPOM) & Myopie de la propagation de messages, pas de géométrie ni de stéréochimie, pas de pré-entraînement \\
+      \hline
+      Uni-Mol & Attention globale, géométrie 3D, pré-entraînement massif, outils disponibles & Dépend des conformères générés, invariant par réflexion, coût de calcul \\
+      \hline
+      Uni-Mol2 & Paires combinant géométrie et topologie, modèles plus grands, loi d'échelle & Coût encore supérieur, mêmes limites géométriques, intégration plus lourde \\
+      \hline
+      Han et al. & Même tâche et mêmes données, protocole d'évaluation de référence & Détails d'entraînement manquants, gains modestes, ensemble coûteux \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Tableau comparatif des propositions étudiées}
+   \label{tab:Comparatif}
+\end{table}
+
+\begin{table*}
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l||c|c|c|c|}
+      \hline
+      Critère & POM / OpenPOM & Uni-Mol & Uni-Mol2 & Han et al. \\
+      \hline
+      \hline
+      Interactions entre atomes éloignés & & $\surd$ & $\surd$ & $\surd$ \\
+      \hline
+      Géométrie 3D & & $\surd$ & $\surd$ & $\surd$ \\
+      \hline
+      Distinction des énantiomères & & & & $\approx$ \\
+      \hline
+      Pré-entraînement à grande échelle & & $\surd$ & $\surd$ & $\surd$ \\
+      \hline
+      Évalué sur GS-LF & $\surd$ & & & $\surd$ \\
+      \hline
+      Protocole d'évaluation reproductible & $\surd$ & & & $\approx$ \\
+      \hline
+      Code et poids disponibles & $\surd$ & $\surd$ & $\surd$ & \\
+      \hline
+      Coût de calcul modéré & $\surd$ & $\approx$ & & \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Tableau comparatif des avantages des propositions étudiées ($\surd$~: oui~; $\approx$~: partiellement)}
+   \label{tab:ComparatifAlternatif}
+\end{table*}
+
+%--------------------------------------------------------------------------------
+
+\section{Conclusion}
+\label{sec:ConclusionEtatArt}
+
+Les GNN de référence définissent le cadre et les performances à atteindre sur GS-LF, mais n'exploitent ni la géométrie ni un pré-entraînement à grande échelle.
+Uni-Mol et Uni-Mol2 apportent ces deux éléments, et le travail de Han et al. confirme qu'Uni-Mol2 ajusté atteint, voire dépasse légèrement, l'état de l'art sur cette tâche.
+
+Trois directions se dégagent pour notre travail~:
+\begin{enumerate}
+   \item adapter un transformeur Uni-Mol à la classification multi-label des 138 descripteurs, avec un décodeur MLP, en commençant par la version~1, directement disponible, avant de passer à Uni-Mol2~;
+   \item traiter explicitement le déséquilibre des descripteurs et la faible quantité de données~;
+   \item reproduire le protocole d'évaluation de \cite{Han-2026}, condition nécessaire pour comparer nos résultats à ceux de la littérature.
+\end{enumerate}
+Ces directions font l'objet du chapitre suivant.

@@ -1,0 +1,121 @@
+% gvim: encoding=utf8
+
+\documentclass[11pt, french, screen, research-development]{report-rd-info}
+   % - 11pt:  12pt peut être préférable pour faciliter la lecture sur les petits écrans, demander à l'encadrement
+   % - french:  à remplacer par english en cas de rédaction (exceptionnelle) en anglais
+   % - screen:  à enlever pour obtenir un rapport au format A4
+   % - research-development:  à remplacer par 'research' seul, ou 'development' seul, voire 'intelligence' en fonction de la demande du jury à l'issue du travail
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% définitions propres au contenu actuel
+\usepackage{amsmath, amssymb}
+\usepackage{algorithm}
+   \floatname{algorithm}{Algorithme}
+   \ifenglish\renewcommand{\listalgorithmname}{List of Algorithms}
+   \else     \renewcommand{\listalgorithmname}{Liste des algorithmes}
+   \fi
+\usepackage{listings}
+   \lstset{backgroundcolor={\color{yellow}},
+           columns=fullflexible,
+           commentstyle={\color{blue}},
+           numbers=left,
+           numbersep=5pt,
+           numberstyle={\tiny},
+           stepnumber=1}
+\usepackage{algorithmic}
+   \renewcommand{\algorithmicrequire}{\textbf{Entrée~:}}
+   \renewcommand{\algorithmicensure}{\textbf{Sortie~:}}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{url}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{adjustbox}
+   % - réduit les tableaux trop larges à la largeur de la colonne
+
+\newtheorem{theoreme}{Théorème}
+\newtheorem{preuve}{Preuve}
+\newtheorem{definition}{Définition}
+
+% Emplacement réservé à un contenu produit ultérieurement (schéma Excalidraw, image, résultat).
+% Recherche de tous les emplacements : grep -rn "placeholder\|acompleter" documentation/rapport
+\newcommand{\placeholder}[1]{%
+   \fbox{\parbox{0.92\linewidth}{\centering\vspace{1.5em}\textcolor{red}{\textbf{[#1]}}\vspace{1.5em}}}}
+% Information manquante, en ligne dans le texte ou dans un tableau.
+\newcommand{\acompleter}[1]{\textcolor{red}{\textbf{[à compléter: #1]}}}
+
+\begin{document}
+
+\title{Graph Transformer pour la classification multi-label de molécules odorantes}
+\subtitle{Rapport de phase~I}
+\authorA{Tom}{Daniaud}
+\authorB{Florian}{Petiot}
+\supervisor{Fabrice}{Guillet}
+\cosupervisor{Angélique}{Villière}
+\coordinator{Prénom}{Nom} % [à compléter : coordinateur des PRED]
+\institution{LS2N}
+\theme{\'Equipe DUKE} % [à vérifier : équipe de rattachement de l'encadrant]
+\coinstitution{Oniris Nantes}{Oniris}{1.7cm}
+   % - nécessite le logo logos/Oniris.pdf (sinon commenter cette ligne)
+\date{24 novembre 2026}
+
+%--------------------------------------------------------------------------------
+
+\begin{abstract}
+\small
+L'identification des odeurs des molécules constituant un arôme repose aujourd'hui sur l'olfactométrie, qui combine analyse chimique et perception d'un juge entraîné.
+Prédire ces odeurs à partir de la seule structure moléculaire est un problème de classification multi-label difficile~: les données sont rares (environ 5\,000 molécules), bruitées et très déséquilibrées.
+Les modèles de référence (POM, OpenPOM) reposent sur des réseaux de neurones sur graphes 2D, myopes vis-à-vis des atomes éloignés et aveugles à la géométrie.
+Nous étudions l'apport d'un transformeur de graphes 3D pré-entraîné, Uni-Mol, combiné à un décodeur multi-label de type MLP, sur le jeu de données GS-LF (4\,983 molécules, 138 descripteurs).
+Nous avons construit une chaîne complète~: génération de conformères 3D, encodage au format Uni-Mol, augmentation géométrique, perte asymétrique pour le déséquilibre, dégel partiel du transformeur, et un protocole d'évaluation aligné sur celui de la littérature.
+Dix-sept expérimentations successives ont porté le F1 macro de validation de 0,21 à 0,35 et l'AUROC macro jusqu'à 0,87, un ordre de grandeur proche des modèles de référence, mais pas encore directement comparable faute d'évaluation sur un test tenu à l'écart.
+La phase~II portera sur l'évaluation selon ce protocole, le passage à Uni-Mol2, la prise en compte des dépendances entre descripteurs et l'agrégation de nouvelles données, notamment stéréochimiques.
+\end{abstract}
+
+\begin{classification}
+\small
+   \category{I.2.6}{Artificial Intelligence}{Learning -- Connectionism and neural nets}
+   \category{I.5.2}{Pattern Recognition}{Design Methodology -- Classifier design and evaluation}
+   \category{J.2}{Physical Sciences and Engineering}{Chemistry}
+   \terms{Algorithms, Experimentation, Performance, Measurement.}
+   \keywords{Classification multi-label, olfaction computationnelle, relations structure-odeur, transformeur de graphes, Uni-Mol, représentation moléculaire 3D, apprentissage par transfert, déséquilibre de classes.}
+\end{classification}
+
+\maketitle
+
+%--------------------------------------------------------------------------------
+
+\begin{acknowledgements}
+   Nous remercions Fabrice Guillet (LS2N) et Angélique Villière (Oniris) pour leur encadrement, leur disponibilité et les échanges qui ont orienté ce travail.
+\end{acknowledgements}
+
+%--------------------------------------------------------------------------------
+
+\newpage
+
+\tableofcontents
+
+%--------------------------------------------------------------------------------
+
+\input{chapitres/1-introduction}
+\input{chapitres/2-etat-de-l-art}
+\input{chapitres/3-proposition}
+\input{chapitres/4-experimentations}
+\input{chapitres/5-conclusion}
+
+%--------------------------------------------------------------------------------
+
+\bibliography{rapport}
+
+\listoffigures{}
+
+\listoftables{}
+
+\listofalgorithms{}
+
+\appendix
+
+\input{chapitres/annexes}
+
+\end{document}

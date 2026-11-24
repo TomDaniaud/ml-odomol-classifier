@@ -1,0 +1,356 @@
+\chapter{Fiches de lecture}
+\label{ann:FichesLecture}
+
+Le tableau~\ref{tab:FichesLecture} récapitule les travaux étudiés et leur lien avec le projet~; chacun fait ensuite l'objet d'une fiche.
+
+\begin{table}[H]
+   \centering
+   \begin{adjustbox}{max width=\linewidth}
+   \begin{tabular}{|l|c|p{0.5\linewidth}|}
+      \hline
+      Référence & Année & Apport pour le projet \\
+      \hline
+      \hline
+      Sanchez-Lengeling et al. \cite{SanchezLengeling-2019} & 2019 & Formulation multi-label de la tâche, premier GNN \\
+      \hline
+      Lee et al. \cite{Lee-2023} & 2023 & Jeu GS-LF, modèle de référence POM \\
+      \hline
+      Zhou et al. \cite{Zhou-2023} & 2023 & Encodeur Uni-Mol utilisé \\
+      \hline
+      Ji et al. \cite{Ji-2024} & 2024 & Uni-Mol2, modèle cible du sujet \\
+      \hline
+      Han et al. \cite{Han-2026} & 2026 & Uni-Mol2 en olfaction, protocole d'évaluation repris \\
+      \hline
+      Ridnik et al. \cite{Ridnik-2021} & 2021 & Perte asymétrique utilisée \\
+      \hline
+   \end{tabular}
+   \end{adjustbox}
+   \caption{Récapitulatif des fiches de lecture}
+   \label{tab:FichesLecture}
+\end{table}
+
+\paragraph{\emph{Machine learning for scent: learning generalizable perceptual representations of small molecules}.}
+Premier travail d'apprentissage profond à grande échelle sur la prédiction des odeurs \cite{SanchezLengeling-2019}.
+
+\subparagraph{Résumé.}
+Les auteurs constituent un jeu d'environ 5\,000 molécules annotées par 138 descripteurs, issu des catalogues GoodScents et Leffingwell, et entraînent un GNN par propagation de messages sur le graphe moléculaire.
+Le GNN surpasse des modèles fondés sur des empreintes moléculaires et des descripteurs chimiques.
+Sa représentation interne regroupe les molécules selon leurs odeurs et se transfère à d'autres tâches olfactives.
+
+\subparagraph{Analyse.}
+Ce travail fonde la formulation que nous reprenons (multi-label, 138 descripteurs, métriques macro).
+Il utilise un modèle 2D appris à partir de zéro, ce qui laisse ouverte la question de l'apport de la géométrie et du pré-entraînement, au cœur de notre sujet.
+
+\paragraph{\emph{A principal odor map unifies diverse tasks in olfactory perception}.}
+Prolongement du travail précédent, publié dans \emph{Science} \cite{Lee-2023}.
+
+\subparagraph{Résumé.}
+Le modèle POM, un GNN entraîné sur la fusion nettoyée GS-LF, définit une carte des odeurs.
+Une validation prospective sur environ 400 molécules nouvelles, évaluées par un panel entraîné, montre que ses prédictions sont, pour une majorité des molécules, plus proches du consensus du panel que celles d'un panéliste médian.
+La carte se transfère à d'autres tâches (intensité, similarité, etc.).
+
+\subparagraph{Analyse.}
+POM est le modèle de référence de la tâche et son protocole (test tenu à l'écart, validation croisée, ensemble) est repris par les travaux ultérieurs.
+Son code n'étant pas publié, la comparaison reproductible passe par OpenPOM.
+Pour notre projet, il fournit les données et les performances à atteindre.
+
+\paragraph{\emph{Uni-Mol: a universal 3D molecular representation learning framework}.}
+Proposition d'un transformeur moléculaire 3D pré-entraîné \cite{Zhou-2023}.
+
+\subparagraph{Résumé.}
+Uni-Mol traite les atomes comme des tokens et encode leurs distances par noyaux gaussiens dans une représentation de paires qui biaise l'attention.
+Il est pré-entraîné sur plus de 200 millions de conformations de 19 millions de molécules, en retrouvant des atomes masqués et en débruitant des coordonnées.
+Ajusté sur des tâches de prédiction de propriétés moléculaires, il obtient de très bons résultats.
+
+\subparagraph{Analyse.}
+C'est l'encodeur utilisé dans notre travail, via la bibliothèque \texttt{unimol\_tools}.
+Sa représentation, fondée sur les distances, est invariante par réflexion~: elle ne distingue pas les énantiomères, limite importante pour l'olfaction.
+L'encodage des entrées doit reproduire exactement celui du pré-entraînement.
+
+\paragraph{\emph{Exploring molecular pretraining model at scale}.}
+Article principal désigné par le sujet \cite{Ji-2024}.
+
+\subparagraph{Résumé.}
+Les auteurs constituent un jeu d'environ 884 millions de molécules et entraînent Uni-Mol2, un transformeur à deux pistes (atomes et paires), de 84 millions à 1,1 milliard de paramètres.
+Les paires combinent distances, types de liaisons et plus courts chemins dans le graphe.
+Ils établissent une loi d'échelle reliant la perte de validation à la taille du modèle, des données et du calcul, et montrent que les performances en aval progressent avec la taille.
+
+\subparagraph{Analyse.}
+Uni-Mol2 est la cible de la phase~II.
+L'ajout d'informations topologiques aux distances devrait aider, mais la stéréochimie des énantiomères reste a priori hors de portée.
+Le coût de calcul impose de commencer par la plus petite version (84M), comme l'a fait \cite{Han-2026}.
+
+\paragraph{\emph{A general-purpose molecular foundation model transfers across diverse olfactory tasks}.}
+Application d'Uni-Mol2 à l'olfaction \cite{Han-2026}.
+
+\subparagraph{Résumé.}
+Uni-Mol2 (84M) est ajusté une fois sur GS-LF avec une perte focale, puis évalué sans nouvel entraînement sur plusieurs tâches olfactives.
+Sur le test de GS-LF, il dépasse POM et OpenPOM sur les cinq métriques macro, avec des écarts modestes.
+Il distingue les énantiomères, contrairement à OpenPOM, mais sans savoir lequel porte quelle odeur.
+L'analyse des erreurs montre que les confusions suivent les co-occurrences entre descripteurs.
+
+\subparagraph{Analyse.}
+C'est le travail le plus proche du nôtre~: nous en reprenons le protocole d'évaluation pour comparer nos résultats.
+Plusieurs détails d'entraînement manquent pour le reproduire exactement.
+Son analyse des confusions inspire notre proposition de factorisation du décodeur.
+
+\paragraph{\emph{Asymmetric loss for multi-label classification}.}
+Proposition d'une fonction de perte adaptée au multi-label déséquilibré \cite{Ridnik-2021}.
+
+\subparagraph{Résumé.}
+En multi-label, chaque exemple a beaucoup plus de labels négatifs que positifs.
+La perte asymétrique applique une focalisation différente aux positifs et aux négatifs, et décale la probabilité des négatifs d'une marge qui annule la perte des plus faciles et atténue l'effet des étiquettes erronées.
+Elle améliore l'état de l'art sur plusieurs bancs d'essai de classification d'images multi-label.
+
+\subparagraph{Analyse.}
+Notre problème présente exactement ce déséquilibre (environ 4,9 descripteurs positifs sur 138 par molécule).
+La perte asymétrique a apporté l'un des gains les plus nets de nos expériences.
+
+%--------------------------------------------------------------------------------
+
+\chapter{Planification}
+\label{ann:Planification}
+
+La figure~\ref{fig:PlanningPrevisionnel} présente le planning élaboré au début du projet.
+
+\begin{figure*}
+   \centering
+   \placeholder{schema: diagramme de Gantt prévisionnel de la phase I}
+   \caption{Planification prévisionnelle}
+   \label{fig:PlanningPrevisionnel}
+\end{figure*}
+
+La figure~\ref{fig:PlanningEffectif} présente le planning effectif, relevé au fur et à mesure de l'avancement.
+
+\begin{figure*}
+   \centering
+   \placeholder{schema: diagramme de Gantt effectif -- mise en place du projet (13--15 oct.), représentations figées et premières expériences (15--17 oct.), conformations 3D (18--21 oct.), perte asymétrique (25 oct.--3 nov.), corrections de l'encodage et dégel (4--6 nov.), suivi des expériences et schémas (16 nov.), validation croisée et protocole d'évaluation (17--24 nov.)}
+   \caption{Planning effectif}
+   \label{fig:PlanningEffectif}
+\end{figure*}
+
+\acompleter{discussion des écarts entre les deux plannings et leçons sur la gestion du projet}
+
+%--------------------------------------------------------------------------------
+
+\chapter{Fiches de suivi}
+\label{ann:FichesSuivi}
+
+% Les temps de travail (\tempstravailA pour Tom Daniaud, \tempstravailB pour Florian Petiot)
+% sont à compléter : valeurs à 0 par défaut.
+% Le travail effectué est reconstitué à partir de l'historique Git.
+
+\begin{fichesuivi}{}{12 octobre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item \acompleter{étude préalable et bibliographique antérieure au développement}
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+      \begin{itemize}
+         \item \acompleter{réunions avec les encadrants}
+      \end{itemize}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{13 octobre 2026}{17 octobre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item mise en place du dépôt, de la configuration et du suivi TensorBoard~;
+         \item intégration du jeu GS-LF et calcul des représentations Uni-Mol figées~;
+         \item décodeur de classification, métriques et premières expériences (1 à 7)~;
+         \item analyse des données et pondération des descripteurs~;
+         \item création du journal d'expériences.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+      \begin{itemize}
+         \item passer à des conformations 3D pour permettre l'augmentation de données.
+      \end{itemize}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{18 octobre 2026}{24 octobre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item génération hors ligne des conformations 3D et intégration d'Uni-Mol comme encodeur~;
+         \item optimisation du seuil de décision~;
+         \item découpage par squelettes de Bemis-Murcko~;
+         \item prise en charge des GPU Intel Arc~;
+         \item expériences 8 à 13.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{25 octobre 2026}{31 octobre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item ajout du F1 micro~;
+         \item réorganisation des pertes et métriques, perte asymétrique~;
+         \item expérience 14.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{1\textsuperscript{er} novembre 2026}{7 novembre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item décodeur à plusieurs couches~;
+         \item correction de l'encodage Uni-Mol (dictionnaire, distances de \texttt{[CLS]}, mode évaluation de l'encodeur gelé)~;
+         \item taux d'apprentissage différencié pour l'encodeur et F1 par descripteur~;
+         \item expériences 15 à 17.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{8 novembre 2026}{14 novembre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item \acompleter{travail de la semaine}
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{15 novembre 2026}{21 novembre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item réorganisation des journaux d'expériences~;
+         \item schémas de la chaîne et de l'architecture (Excalidraw)~;
+         \item validation croisée à cinq plis.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+   \end{echange}
+
+   \begin{planification}
+   \end{planification}
+\end{fichesuivi}
+
+\begin{fichesuivi}{22 novembre 2026}{24 novembre 2026}
+   \tempstravailA{0}{0}
+   \tempstravailB{0}{0}
+
+   \begin{travaileffectue}
+      \begin{itemize}
+         \item étude de \cite{Han-2026} et comparaison avec la littérature~;
+         \item découpage de référence et implémentation du protocole d'évaluation~;
+         \item rédaction du rapport de phase~I.
+      \end{itemize}
+   \end{travaileffectue}
+
+   \begin{travailnoneffectue}
+      \begin{itemize}
+         \item exécution complète du protocole d'évaluation, reportée à la phase~II.
+      \end{itemize}
+   \end{travailnoneffectue}
+
+   \begin{echange}
+      \begin{itemize}
+         \item pistes pour la phase~II~: modélisation des dépendances entre descripteurs, agrégation de données stéréochimiques.
+      \end{itemize}
+   \end{echange}
+
+   \begin{planification}
+      \begin{itemize}
+         \item exécuter le protocole d'évaluation~;
+         \item passer à Uni-Mol2.
+      \end{itemize}
+   \end{planification}
+\end{fichesuivi}
+
+\printweeksummary
+
+%--------------------------------------------------------------------------------
+
+\chapter{Auto-contrôle et auto-évaluation}
+\label{ann:AutoEvaluation}
+
+La figure~\ref{fig:AutoEvaluationTravailIntermediaire} énumère les points à contrôler dans les trois composantes du travail (rapport, présentation orale, travail de fond) et notre niveau de satisfaction à l'issue de la phase~I.
+
+\begin{figure*}
+   \centering
+      \ifscreen
+         \rotatebox{90}{\includegraphics[width=0.9\textheight]{Images/Grille-Evaluation-PRD1}}
+      \else
+         \includegraphics[width=0.9\textwidth]{Images/Grille-Evaluation-PRD1}
+      \fi
+   \caption{Points à contrôler à l'issue de la phase I}
+   \label{fig:AutoEvaluationTravailIntermediaire}
+\end{figure*}
+
+\acompleter{commentaire des points de satisfaction et d'insatisfaction}

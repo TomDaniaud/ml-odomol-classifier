@@ -36,6 +36,7 @@ from torchmetrics.classification import MultilabelAUROC
 os.environ["HYDRA_FULL_ERROR"] = "1"
 rootutils.setup_root(__file__, indicator="pyproject.toml", pythonpath=True)
 
+from src.models.benchmark_metrics import evaluate  # noqa: E402
 from src.models.metrics import OptimalMultiLabelF1  # noqa: E402
 from src.utils.hardware import get_hardware_strategy  # noqa: E402
 from src.utils.resolvers import register_resolvers  # noqa: E402
@@ -56,14 +57,16 @@ def collect_fold_predictions(
     model: LightningModule,
     datamodule: LightningDataModule,
     device: torch.device,
+    split: str = "val",
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Exécute une passe d'inférence sur le pli de validation pour extraire les probabilités OOF."""
+    """Passe d'inférence sur le pli de validation (probabilités OOF) ou sur le jeu de test tenu à l'écart."""
     model.eval()
     model.to(device)
     probs_chunks: list[torch.Tensor] = []
     targets_chunks: list[torch.Tensor] = []
 
-    for batch in datamodule.val_dataloader():
+    loader = datamodule.test_dataloader() if split == "test" else datamodule.val_dataloader()
+    for batch in loader:
         inputs, targets = batch
         if isinstance(inputs, dict):
             inputs_dev = {
@@ -187,6 +190,7 @@ def main(cfg: DictConfig) -> None:
     fold_probs_dict: dict[int, torch.Tensor] = {}
     fold_targets_dict: dict[int, torch.Tensor] = {}
     fold_val_indices: dict[int, np.ndarray] = {}
+    fold_test_probs: list[torch.Tensor] = []
 
     for fold_idx in range(num_folds):
         log.info("=" * 80)
@@ -290,6 +294,11 @@ def main(cfg: DictConfig) -> None:
         if getattr(datamodule, "val_idx", None) is not None:
             fold_val_indices[fold_idx] = datamodule.val_idx
 
+        # Split 'benchmark' : le modèle de ce pli prédit aussi le jeu de test tenu à l'écart
+        if getattr(datamodule, "data_test", None) is not None:
+            test_probs_k, test_targets = collect_fold_predictions(model, datamodule, infer_device, split="test")
+            fold_test_probs.append(test_probs_k)
+
         del trainer, model, datamodule
         release_accelerator_memory()
 
@@ -383,6 +392,15 @@ def main(cfg: DictConfig) -> None:
 
     log.info(f"Rapport de validation croisée sauvegardé dans : {report_path}")
     log.info(f"Prédictions OOF et seuils optimaux par classe sauvegardés dans : {oof_path}")
+
+    # --- TEST TENU À L'ÉCART, PROTOCOLE HAN ET AL. 2026 ---
+    # Ensemble = moyenne des 5 modèles de pli ; seuils par label appris sur les prédictions OOF.
+    if fold_test_probs:
+        test_probs = torch.stack(fold_test_probs).mean(dim=0)
+        result = evaluate(all_oof_probs.numpy(), all_oof_targets.numpy(), test_probs.numpy(), test_targets.numpy())
+        for name, (value, low, high) in result.items():
+            log.info(f"test/{name} = {value:.4f}  [IC 95 % : {low:.4f} – {high:.4f}]")
+        (base_output_dir / "test_metrics.json").write_text(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

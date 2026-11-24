@@ -1,0 +1,94 @@
+\chapter{Introduction}
+\label{chap:Introduction}
+
+Ce chapitre présente la problématique de la prédiction des odeurs à partir de la structure des molécules, les objectifs que nous nous sommes fixés, le travail réalisé durant la phase~I et ses principaux apports.
+Il se termine par le plan du rapport.
+
+%--------------------------------------------------------------------------------
+
+\section{Présentation de la problématique}
+\label{sec:Problematique}
+
+L'équipe <<~Flaveur~>> du laboratoire GPEA d'Oniris étudie les arômes des aliments par olfactométrie.
+Cette technique couple une séparation chimique des composés volatils à la perception humaine d'un juge entraîné, un <<~nez~>>, qui décrit l'odeur de chaque molécule au moment où elle est détectée \cite{Meierhenrich-2005}.
+L'identification est donc coûteuse, lente et dépendante de l'expertise humaine.
+Disposer d'un modèle capable de proposer les descripteurs olfactifs d'une molécule à partir de sa seule structure permettrait d'assister ce travail.
+
+Ce problème relève des relations structure-odeur, étudiées depuis longtemps en chimie, et que l'apprentissage automatique aborde aujourd'hui comme un problème de \emph{classification multi-label}~: une molécule est associée simultanément à plusieurs descripteurs (\emph{fruité}, \emph{vert}, \emph{boisé}, etc.) choisis dans un vocabulaire fixe.
+Deux difficultés le rendent particulièrement délicat~:
+\begin{itemize}
+   \item \textbf{la rareté des données}~: les jeux de données annotés publics comptent quelques milliers de molécules seulement (4\,983 pour le jeu GS-LF utilisé ici)~;
+   \item \textbf{leur variabilité}~: la perception olfactive varie d'un individu à l'autre (physiologie, anosmies, culture, représentation mentale des odeurs), ce qui rend les annotations bruitées~; s'y ajoute un fort déséquilibre, certains descripteurs étant attribués à près de 2\,000 molécules et d'autres à une trentaine.
+\end{itemize}
+
+Les approches de référence \cite{SanchezLengeling-2019, Lee-2023} représentent la molécule par son graphe (atomes et liaisons) et l'encodent avec un réseau de neurones sur graphes (GNN).
+Ces réseaux procèdent par propagation de messages entre atomes voisins~: ils sont naturellement myopes vis-à-vis des atomes éloignés dans le graphe et ignorent la forme tridimensionnelle de la molécule, alors que cette dernière conditionne son interaction avec les récepteurs olfactifs.
+Le mécanisme d'attention des transformeurs \cite{Vaswani-2017} ne souffre pas de cette limite de distance, et les transformeurs de graphes \cite{Shehzad-2024, Kim-2022} l'adaptent aux données non séquentielles.
+Parmi eux, Uni-Mol \cite{Zhou-2023} et Uni-Mol2 \cite{Ji-2024} sont pré-entraînés sur des centaines de millions de conformations 3D et intègrent explicitement la géométrie.
+La problématique de ce travail est donc la suivante~:
+\begin{quote}
+   \emph{un transformeur de graphes 3D pré-entraîné, adapté à la classification multi-label, permet-il de mieux prédire les descripteurs olfactifs d'une molécule que les GNN 2D de référence, malgré la faible quantité de données disponibles~?}
+\end{quote}
+
+%--------------------------------------------------------------------------------
+
+\section{Objectifs poursuivis}
+\label{sec:Objectifs}
+
+Le sujet fixe comme cadre l'utilisation du transformeur Uni-Mol, combiné à un décodeur multi-label de type MLP, sur le jeu de données GS-LF.
+Nous en avons dérivé deux objectifs principaux.
+
+\paragraph{Construire une méthodologie d'apprentissage.}
+Il s'agit de mettre en place une chaîne complète et reproductible, de la molécule (code SMILES) jusqu'aux probabilités des 138 descripteurs~:
+choix et préparation des données, transformation des molécules en entrées du transformeur, intégration d'un décodeur multi-label, choix du mode d'apprentissage (modèle gelé ou ajustement fin), traitement du déséquilibre des classes et choix des hyperparamètres.
+
+\paragraph{Évaluer la précision du modèle.}
+Il s'agit de mesurer les performances du modèle avec des métriques adaptées au multi-label déséquilibré (AUROC, AUPRC, F1, précision et rappel en moyenne macro) et, surtout, de les rendre \emph{directement comparables} à celles publiées pour les modèles de référence.
+Cela impose de reproduire leur protocole d'évaluation, et non seulement leurs métriques.
+
+%--------------------------------------------------------------------------------
+
+\section{Travail réalisé}
+\label{sec:TravailRealise}
+
+Le travail de la phase~I s'est déroulé en trois temps.
+
+\begin{enumerate}
+   \item \textbf{Étude bibliographique}~: analyse des modèles de référence en olfaction (QSOR, POM, OpenPOM), du transformeur Uni-Mol et de sa seconde version, puis d'un travail récent appliquant Uni-Mol2 à l'olfaction \cite{Han-2026}, dont nous avons repris le protocole d'évaluation.
+   \item \textbf{Développement}~: une chaîne d'apprentissage modulaire (PyTorch Lightning et Hydra), qui génère hors ligne des conformères 3D, les encode au format Uni-Mol, les augmente à la volée, et ajuste le transformeur avec un décodeur MLP.
+   \item \textbf{Expérimentation}~: dix-sept expériences successives, chacune isolant un choix (fonction de perte, régularisation, ordonnanceur, augmentation, découpage, décodeur, dégel du transformeur), suivies dans TensorBoard et consignées dans un journal d'expériences.
+\end{enumerate}
+
+Une première version utilisait des représentations Uni-Mol figées calculées une fois pour toutes.
+Elle a été remplacée par un encodage de conformères 3D, qui permet l'augmentation des données puis l'ajustement fin du transformeur.
+Enfin, le protocole d'évaluation de la littérature a été implémenté en fin de phase~; son exécution complète reste à faire.
+
+%--------------------------------------------------------------------------------
+
+\section{Contribution}
+\label{sec:Contribution}
+
+Les apports de cette première phase sont les suivants~:
+\begin{itemize}
+   \item une chaîne complète d'apprentissage d'un classifieur multi-label d'odeurs fondé sur Uni-Mol, à partir de conformères 3D, avec augmentation géométrique, perte asymétrique \cite{Ridnik-2021} et dégel partiel du transformeur~;
+   \item une progression mesurée du F1 macro de validation de 0,21 à 0,35 et de l'AUROC macro de 0,84 à 0,87 au fil des expériences, la plus forte amélioration venant de la correction de l'encodage des entrées d'Uni-Mol puis de l'ajustement fin de ses dernières couches~;
+   \item la mise en évidence que nos premières mesures n'étaient pas comparables à la littérature (évaluation sur la validation, meilleure époque, seuil global), et l'implémentation du protocole de \cite{Han-2026}~: test tenu à l'écart, validation croisée à cinq plis, seuils par descripteur appris hors pli, ensemble des modèles et intervalles de confiance par bootstrap~;
+   \item une analyse des limites de l'approche, en particulier l'invariance d'Uni-Mol par réflexion, qui l'empêche de distinguer deux énantiomères, et des pistes pour la phase~II.
+\end{itemize}
+
+À ce stade, nos meilleurs résultats sont du même ordre de grandeur que ceux d'OpenPOM (F1 macro de 0,375 sur le test), sans qu'une conclusion définitive puisse être tirée avant l'évaluation selon le protocole de référence.
+
+%--------------------------------------------------------------------------------
+
+\section{Plan de l'étude}
+\label{sec:Plan}
+
+Le chapitre~\ref{chap:EtatArt} étudie les travaux de la littérature~: les GNN de référence en olfaction (POM et OpenPOM), le transformeur Uni-Mol et sa seconde version, et l'application d'Uni-Mol2 à l'olfaction.
+Leur analyse comparative fait ressortir les pistes que nous avons retenues.
+
+Le chapitre~\ref{chap:Propositions} formalise notre proposition~: l'adaptation d'Uni-Mol à la classification multi-label des odeurs, le traitement du déséquilibre et le protocole d'évaluation.
+
+Le chapitre~\ref{chap:Experimentations} décrit les outils et les développements réalisés, la mise en place des expériences, leurs résultats et leur analyse.
+
+La conclusion résume le travail effectué, en tire les enseignements et présente les perspectives de la phase~II.
+Les annexes regroupent les fiches de lecture, la planification, les fiches de suivi et l'auto-évaluation.
