@@ -1,0 +1,189 @@
+\chapter{Proposition}
+\label{chap:Propositions}
+
+Partant de l'hypothèse qu'une représentation 3D pré-entraînée capture mieux les déterminants structurels de l'odeur qu'un GNN 2D appris à partir de zéro, nous proposons d'adapter le transformeur Uni-Mol à la classification multi-label des 138 descripteurs de GS-LF.
+Cette proposition se décompose en trois sous-problèmes complémentaires~: la représentation des molécules et l'encodage par le transformeur, l'apprentissage du décodeur multi-label malgré le déséquilibre, et l'évaluation selon un protocole comparable à la littérature.
+La section~\ref{sec:PropositionUniMol} présente successivement les idées qui la fondent, les outils nécessaires, sa formalisation et son analyse.
+
+%--------------------------------------------------------------------------------
+
+\section{Adaptation d'Uni-Mol à la classification multi-label des odeurs}
+\label{sec:PropositionUniMol}
+
+\subsection{Idées préliminaires}
+\label{sec:IdeesPreliminaires}
+
+\paragraph{Transférer plutôt qu'apprendre.}
+Avec environ 5\,000 molécules, entraîner un transformeur de 47 millions de paramètres à partir de zéro conduirait à un surapprentissage massif.
+Nous réutilisons donc Uni-Mol pré-entraîné comme \emph{encodeur}~: il transforme une molécule en un vecteur de dimension 512 (la sortie du token \texttt{[CLS]}), sur lequel un petit décodeur MLP prédit les 138 descripteurs.
+Deux modes d'apprentissage sont envisagés~: encodeur entièrement gelé, où seul le décodeur apprend, puis dégel des dernières couches de l'encodeur, ajustées avec un taux d'apprentissage plus faible que celui du décodeur.
+
+\paragraph{Utiliser la géométrie, et sa variabilité.}
+Une molécule n'a pas une forme unique mais un ensemble de conformations.
+Plutôt que d'en choisir une, nous en générons plusieurs par molécule et en tirons une au hasard à chaque passage pendant l'entraînement.
+Ce tirage, complété par un léger bruit sur les coordonnées, constitue une augmentation de données naturelle~: le modèle apprend une représentation robuste aux variations de conformation, ce qui est précieux lorsque les données sont rares.
+
+\paragraph{Compenser le déséquilibre.}
+La plupart des descripteurs sont absents de la plupart des molécules~: une perte d'entropie croisée binaire standard est dominée par ces négatifs faciles, et le modèle apprend à prédire <<~absent~>> partout.
+Nous comparons deux remèdes~: pondérer les positifs de chaque descripteur par l'inverse de leur fréquence, et utiliser une perte asymétrique \cite{Ridnik-2021}, qui atténue la contribution des négatifs faciles.
+
+\paragraph{Évaluer comme la littérature.}
+Les métriques n'ont de sens que relativement à un protocole.
+Nous adoptons celui de \cite{Han-2026}, décrit à la section~\ref{sec:EAHan}, pour que nos résultats soient directement comparables à ceux de POM, OpenPOM et Uni-Mol2.
+
+\subsection{Outils nécessaires}
+\label{sec:OutilsNecessaires}
+
+La proposition s'appuie sur les briques suivantes, détaillées au chapitre~\ref{chap:Experimentations}~:
+\begin{itemize}
+   \item \textbf{RDKit}\footnote{\url{https://www.rdkit.org}}, pour lire les codes SMILES, ajouter les hydrogènes et générer des conformations 3D~;
+   \item \textbf{les poids pré-entraînés d'Uni-Mol} et la bibliothèque \texttt{unimol\_tools}, qui fournit l'architecture et le dictionnaire des atomes~;
+   \item \textbf{PyTorch} et \textbf{PyTorch Lightning}, pour le décodeur, l'apprentissage et le calcul sur GPU~;
+   \item \textbf{scikit-learn} et \textbf{scikit-multilearn}, pour les métriques et la stratification itérative multi-label \cite{Sechidis-2011, Szymanski-2017}.
+\end{itemize}
+
+\subsection{Formalisation}
+\label{sec:Formalisation}
+
+\subsubsection{Définition du problème}
+
+Soit $\mathcal{D} = \{(m_i, \mathbf{y}_i)\}_{i=1}^{N}$ le jeu de données, où $m_i$ est une molécule décrite par son code SMILES et $\mathbf{y}_i \in \{0, 1\}^{L}$ le vecteur de ses descripteurs, avec $N = 4\,983$ et $L = 138$~: $y_{ij} = 1$ si le descripteur $j$ est attribué à la molécule $i$.
+On cherche une fonction $f_\theta$ qui associe à une molécule un vecteur de probabilités $\hat{\mathbf{p}} = f_\theta(m) \in [0, 1]^{L}$, puis des seuils $\boldsymbol{\tau} \in [0, 1]^{L}$ tels que la prédiction $\hat{y}_j = \mathbb{1}[\hat{p}_j \geq \tau_j]$ soit la plus proche possible de $y_j$ pour chaque descripteur.
+
+\subsubsection{Représentation 3D}
+
+Pour chaque molécule $m$, on génère un ensemble de conformations $\mathcal{C}(m) = \{\mathbf{X}^{(1)}, \ldots, \mathbf{X}^{(K_m)}\}$, où $\mathbf{X}^{(k)} \in \mathbb{R}^{n \times 3}$ contient les coordonnées des $n$ atomes, hydrogènes compris.
+Une conformation est encodée par~:
+\begin{itemize}
+   \item la suite des tokens $(t_0, t_1, \ldots, t_n, t_{n+1})$, où $t_0 = \texttt{[CLS]}$, $t_{n+1} = \texttt{[SEP]}$ et $t_1, \ldots, t_n$ sont les indices des atomes dans le dictionnaire d'Uni-Mol, de taille $V = 31$~;
+   \item les coordonnées centrées $\mathbf{x}_k - \bar{\mathbf{x}}$, les tokens spéciaux étant placés à l'origine~;
+   \item la matrice des distances $d_{kl} = \lVert \mathbf{x}_k - \mathbf{x}_l \rVert_2$~;
+   \item le type de chaque paire, $e_{kl} = t_k \times V + t_l$, qui permet au modèle d'adapter l'encodage des distances aux éléments chimiques concernés.
+\end{itemize}
+
+\subsubsection{Encodeur}
+
+Uni-Mol encode chaque distance par $K = 128$ noyaux gaussiens dont l'échelle et le décalage dépendent du type de paire~:
+\begin{equation}
+   \label{eq:Gaussiennes}
+   \boldsymbol{\psi}_{kl} = \left( \mathcal{G}\left(a_{e_{kl}} \, d_{kl} + b_{e_{kl}} ;\ \mu_r, \sigma_r\right) \right)_{r = 1, \ldots, K},
+   \qquad
+   \mathcal{G}(x ; \mu, \sigma) = \frac{1}{\sigma \sqrt{2 \pi}} \, e^{-\frac{(x - \mu)^2}{2 \sigma^2}}
+\end{equation}
+Une projection linéaire de $\boldsymbol{\psi}_{kl}$ initialise la représentation de paires $\mathbf{q}^{0}_{kl}$, qui biaise l'attention de chaque couche $\ell$~:
+\begin{equation}
+   \label{eq:Attention}
+   \mathrm{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \mathrm{softmax}\left( \frac{\mathbf{Q} \mathbf{K}^{\top}}{\sqrt{d}} + \mathbf{q}^{\ell} \right) \mathbf{V},
+   \qquad
+   \mathbf{q}^{\ell + 1}_{kl} = \mathbf{q}^{\ell}_{kl} + \frac{\mathbf{Q}_k \mathbf{K}_l^{\top}}{\sqrt{d}}
+\end{equation}
+Après les 15 couches, la sortie du token \texttt{[CLS]} fournit la représentation de la molécule $\mathbf{h} = g_\phi(\mathbf{X}) \in \mathbb{R}^{512}$.
+Les paramètres $\phi$ de l'encodeur sont gelés, à l'exception éventuelle des $u$ dernières couches.
+Comme la représentation ne dépend que des distances, elle est invariante par toute isométrie de l'espace, rotations, translations \emph{et réflexions}.
+
+\subsubsection{Décodeur multi-label}
+
+Le décodeur est un perceptron multicouche à une couche cachée de dimension 256~:
+\begin{equation}
+   \label{eq:Decodeur}
+   \mathbf{z} = \mathbf{W}_2 \, \mathrm{Dropout}\big(\mathrm{GELU}(\mathrm{LN}(\mathbf{W}_1 \mathbf{h} + \mathbf{b}_1))\big) + \mathbf{b}_2,
+   \qquad
+   \hat{\mathbf{p}} = \sigma(\mathbf{z})
+\end{equation}
+avec $\mathbf{W}_1 \in \mathbb{R}^{256 \times 512}$, $\mathbf{W}_2 \in \mathbb{R}^{138 \times 256}$, $\mathrm{LN}$ une normalisation de couche et $\sigma$ la fonction sigmoïde appliquée à chaque logit $z_j$ indépendamment.
+Chaque ligne $\mathbf{w}_j$ de $\mathbf{W}_2$ est le vecteur propre au descripteur $j$~: le logit vaut $z_j = \mathbf{w}_j \cdot \mathbf{h}' + b_j$, où $\mathbf{h}'$ est la sortie de la couche cachée.
+Les 138 descripteurs sont ainsi traités comme des tâches binaires indépendantes partageant la même représentation.
+
+\subsubsection{Fonction de perte}
+
+\paragraph{Entropie croisée pondérée.}
+Pour un lot $\mathcal{B}$, la perte de référence est l'entropie croisée binaire dont les positifs du descripteur $j$ sont pondérés par $w_j = \min\left(\frac{N - N_j^{+}}{N_j^{+}},\ w_{\max}\right)$, où $N_j^{+}$ est le nombre de positifs du descripteur $j$ dans l'ensemble d'entraînement et $w_{\max} = 20$ un plafond qui évite des gradients excessifs pour les descripteurs les plus rares~:
+\begin{equation}
+   \label{eq:BCE}
+   \mathcal{L}_{\mathrm{BCE}} = -\frac{1}{|\mathcal{B}|\,L} \sum_{i \in \mathcal{B}} \sum_{j=1}^{L} \Big[ w_j \, y_{ij} \log \hat{p}_{ij} + (1 - y_{ij}) \log (1 - \hat{p}_{ij}) \Big]
+\end{equation}
+
+\paragraph{Perte asymétrique.}
+La perte asymétrique (ASL) \cite{Ridnik-2021} traite différemment positifs et négatifs.
+Elle décale d'abord la probabilité des négatifs d'une marge $c$, $\hat{p}^{\,c}_{ij} = \max(\hat{p}_{ij} - c, 0)$, ce qui annule la perte des négatifs très faciles, puis les pondère par un facteur focal d'exposant $\gamma_-$~:
+\begin{equation}
+   \label{eq:ASL}
+   \mathcal{L}_{\mathrm{ASL}} = -\frac{1}{|\mathcal{B}|} \sum_{i \in \mathcal{B}} \sum_{j=1}^{L} \Big[ y_{ij} \, (1 - \hat{p}_{ij})^{\gamma_+} \log \hat{p}_{ij} + (1 - y_{ij}) \, \big(\hat{p}^{\,c}_{ij}\big)^{\gamma_-} \log \big(1 - \hat{p}^{\,c}_{ij}\big) \Big]
+\end{equation}
+Nous utilisons $\gamma_+ = 0$, $\gamma_- = 2$ et $c = 0{,}05$~: les positifs, rares, conservent tout leur poids, tandis que les négatifs déjà bien classés contribuent peu.
+Les facteurs focaux sont traités comme des constantes lors du calcul du gradient, comme dans l'implémentation de référence.
+
+\subsubsection{Augmentation géométrique}
+
+À chaque passage d'une molécule $m$ pendant l'entraînement, on tire une conformation $\mathbf{X}$ uniformément parmi les conformations relaxées de $\mathcal{C}(m)$, puis on perturbe ses coordonnées~:
+\begin{equation}
+   \label{eq:Jitter}
+   \tilde{\mathbf{x}}_k = \mathbf{x}_k + \boldsymbol{\varepsilon}_k,
+   \qquad
+   \boldsymbol{\varepsilon}_k \sim \mathcal{N}(\mathbf{0}, s^2 \mathbf{I}_3),
+   \qquad
+   s \sim \mathcal{U}([s_{\min}, s_{\max}])
+\end{equation}
+avec $s_{\min} = 0{,}01$~\AA{} et $s_{\max} = 0{,}04$~\AA, des amplitudes faibles devant la longueur d'une liaison covalente (de l'ordre de 1~\AA).
+En validation et en test, la conformation est fixe et aucun bruit n'est ajouté.
+Une permutation aléatoire de l'ordre des atomes n'est pas utile~: l'attention sans encodage de position rend déjà Uni-Mol invariant à cet ordre.
+
+\subsubsection{Protocole d'évaluation}
+
+\paragraph{Découpage.}
+GS-LF est découpé en un ensemble d'entraînement $\mathcal{D}_{\mathrm{train}}$ (80~\%) et un ensemble de test $\mathcal{D}_{\mathrm{test}}$ (20~\%) par stratification itérative d'ordre~2 \cite{Sechidis-2011, Szymanski-2017}, qui préserve la fréquence de chaque descripteur et de chaque paire de descripteurs.
+$\mathcal{D}_{\mathrm{train}}$ est à son tour découpé en cinq plis $F_1, \ldots, F_5$ de la même manière.
+
+\paragraph{Seuils hors pli.}
+Pour chaque pli $k$, un modèle $f_k$ est entraîné sur $\mathcal{D}_{\mathrm{train}} \setminus F_k$, sa meilleure époque étant choisie selon l'AUROC macro sur $F_k$.
+Chaque molécule d'entraînement reçoit ainsi une prédiction hors pli $\hat{\mathbf{p}}^{\mathrm{oof}}_i = f_{k(i)}(m_i)$, faite par le seul modèle qui ne l'a pas vue.
+Le seuil de chaque descripteur maximise son F1 sur ces prédictions~:
+\begin{equation}
+   \label{eq:Seuils}
+   \tau_j = \underset{\tau}{\arg\max} \ \mathrm{F1}\Big( \big(y_{ij}\big)_{i \in \mathcal{D}_{\mathrm{train}}},\ \big(\mathbb{1}[\hat{p}^{\mathrm{oof}}_{ij} \geq \tau]\big)_{i \in \mathcal{D}_{\mathrm{train}}} \Big)
+\end{equation}
+
+\paragraph{Ensemble et métriques.}
+Sur le test, les probabilités des cinq modèles sont moyennées, $\hat{\mathbf{p}}_i = \frac{1}{5} \sum_{k=1}^{5} f_k(m_i)$, puis binarisées avec les seuils $\tau_j$.
+Les métriques sont des moyennes macro, c'est-à-dire des moyennes non pondérées sur les descripteurs, ce qui donne le même poids aux descripteurs rares qu'aux fréquents~:
+\begin{equation}
+   \label{eq:F1Macro}
+   \mathrm{F1}_{\mathrm{macro}} = \frac{1}{L} \sum_{j=1}^{L} \frac{2 \, P_j \, R_j}{P_j + R_j}
+\end{equation}
+où $P_j$ et $R_j$ sont la précision et le rappel du descripteur $j$.
+L'AUROC et l'AUPRC macro, indépendantes des seuils, sont calculées de la même façon sur les descripteurs présents dans le test.
+Enfin, l'incertitude est estimée en recalculant les métriques sur 1\,000 rééchantillonnages avec remise du test~; l'intervalle de confiance à 95~\% est donné par les percentiles 2,5 et 97,5.
+
+\begin{figure}
+   \centering
+   \placeholder{schema: chaîne complète -- SMILES, RDKit (conformères), encodage Uni-Mol (tokens, distances, types de paires), augmentation, encodeur Uni-Mol, [CLS] 512, décodeur MLP, 138 logits, sigmoïde, seuils par descripteur}
+   \caption{Vue d'ensemble de la chaîne proposée}
+   \label{fig:Pipeline}
+\end{figure}
+
+\subsection{Analyse}
+\label{sec:AnalyseProposition}
+
+\paragraph{Ce que la proposition résout.}
+Elle répond aux limites des GNN identifiées au chapitre~\ref{chap:EtatArt}~: l'attention globale capte les interactions entre atomes éloignés, la représentation de paires intègre la géométrie, et le pré-entraînement compense en partie la rareté des données.
+La perte asymétrique et les seuils par descripteur traitent le déséquilibre à deux niveaux distincts, l'apprentissage et la décision.
+Le protocole d'évaluation rend la comparaison avec la littérature possible.
+
+\paragraph{Ce qu'elle ne résout pas.}
+L'invariance par réflexion (équation~\ref{eq:Attention} et suivantes) empêche toute distinction entre énantiomères, et GS-LF, dépourvu de stéréochimie, ne permettrait de toute façon pas de l'apprendre.
+Les descripteurs restent traités comme indépendants, alors que leurs co-occurrences sont fortes et que les confusions du modèle en dépendent \cite{Han-2026}.
+Enfin, la variabilité des annotations humaines borne la performance atteignable, quel que soit le modèle.
+
+\paragraph{Coût de calcul.}
+L'attention est quadratique en nombre d'atomes~: avec les hydrogènes, les molécules de GS-LF comptent jusqu'à 184 atomes.
+Le dégel de couches impose de rétropropager à travers l'encodeur, ce qui contraint la taille des lots~; nous utilisons des lots de 8 avec accumulation de gradient sur 8 lots.
+Le protocole complet multiplie le coût d'un entraînement par cinq, contre cinquante pour celui de Han et al.
+
+%--------------------------------------------------------------------------------
+
+\section{Conclusion}
+\label{sec:ConclusionProposition}
+
+Notre proposition combine un encodeur 3D pré-entraîné, une augmentation par conformations, un décodeur MLP entraîné avec une perte asymétrique et un dégel partiel de l'encodeur, ainsi qu'un protocole d'évaluation aligné sur la littérature.
+Plusieurs de ses composantes sont des choix à valider empiriquement~: le mode d'apprentissage, la fonction de perte, l'intérêt de l'augmentation, la profondeur du décodeur ou la stratégie de découpage.
+Le chapitre suivant décrit leur mise en œuvre et les expériences menées pour les départager.
