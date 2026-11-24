@@ -1,0 +1,20 @@
+_target_: src.models.netmodule.ClassifierLightningModule
+nb_labels: 138
+
+net:
+  _target_: src.models.components.odomol_unimol2.Odomol2FineTuneNet
+  model_size: "84m"  # Tailles supportées : '84m' (768), '164m' (768), '310m' (1024), '570m' (1536), '1.1B' (1536)
+  in_channels: 768
+  hidden_channels: 256
+  out_channels: ${model.nb_labels}
+  dropout: 0.4
+  unfreeze_last_n_layers: 0
+  num_layers: 2
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.05
+
+compile: false

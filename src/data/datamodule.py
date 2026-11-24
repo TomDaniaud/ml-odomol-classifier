@@ -19,6 +19,11 @@ from unimol_tools.data import Dictionary
 from unimol_tools.weights import get_weight_dir, weight_download
 
 from src.data.components.conformer_dataset import Conformer3DDataset, unimol_tensor_collate_fn
+from src.data.components.conformer_unimol2_dataset import (
+    Conformer3DUniMol2Dataset,
+    unimol2_tensor_collate_fn,
+)
+from src.data.components.unimol2_transforms import extract_unimol2_graph_tensors
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +134,7 @@ def scaffold_kfold_split(
 
 class OdomolDataModule(LightningDataModule):
     _shared_payload_cache: dict[str, dict[str, Any]] = {}
+    _shared_v2_graph_cache: dict[tuple[str, int], tuple[list[dict[str, torch.Tensor]], list[torch.Tensor]]] = {}
 
     def __init__(
         self,
@@ -147,30 +153,39 @@ class OdomolDataModule(LightningDataModule):
         permute_atoms: bool = True,
         max_pos_weight: float = 20.0,  # Plafond anti-overfitting
         dynamic_augmentation: bool = True,
+        backbone_version: str = "unimol",
+        max_atoms: int = 256,
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
 
-        self.data_train: Conformer3DDataset | None = None
-        self.data_val: Conformer3DDataset | None = None
+        self.data_train: Conformer3DDataset | Conformer3DUniMol2Dataset | None = None
+        self.data_val: Conformer3DDataset | Conformer3DUniMol2Dataset | None = None
         self.pos_weights: torch.Tensor | None = None
         self.train_idx: np.ndarray | None = None
         self.val_idx: np.ndarray | None = None
+        self.pad_idx: int = 0
+
+    @property
+    def _is_unimol2(self) -> bool:
+        version = str(getattr(self.hparams, "backbone_version", "unimol")).lower()
+        return version in {"unimol2", "unimolv2", "v2"}
 
     def setup(self, stage: str | None = None) -> None:
         if self.data_train is not None and self.data_val is not None:
             return
 
-        # Charger le dictionnaire natif d'Uni-Mol
-        weight_dir = get_weight_dir()
-        dict_name = MODEL_CONFIG["dict"]["molecule_all_h"]
-        dict_path = Path(weight_dir) / dict_name
-        if not dict_path.is_file():
-            weight_download(dict_name, weight_dir)
-        with dict_path.open("r", encoding="utf-8") as dictionary_file:
-            self.dictionary = Dictionary.load(dictionary_file)
-        self.dictionary.add_symbol("[MASK]", is_special=True)
-        self.pad_idx = self.dictionary.pad()
+        if not self._is_unimol2:
+            # Charger le dictionnaire natif d'Uni-Mol v1
+            weight_dir = get_weight_dir()
+            dict_name = MODEL_CONFIG["dict"]["molecule_all_h"]
+            dict_path = Path(weight_dir) / dict_name
+            if not dict_path.is_file():
+                weight_download(dict_name, weight_dir)
+            with dict_path.open("r", encoding="utf-8") as dictionary_file:
+                self.dictionary = Dictionary.load(dictionary_file)
+            self.dictionary.add_symbol("[MASK]", is_special=True)
+            self.pad_idx = self.dictionary.pad()
 
         # 1. Chargement unique du fichier .pt en mémoire CPU (mis en cache entre les plis K-Fold)
         data_key = str(Path(self.hparams.data_file).resolve())
@@ -183,9 +198,7 @@ class OdomolDataModule(LightningDataModule):
         label_names: list[str] = payload.get("label_names", [])
 
         # 2. Extraction de la matrice des labels (N_molecules, 138)
-        labels_matrix = np.stack(
-            [mol["labels"].numpy() for mol in all_molecules], axis=0
-        )
+        labels_matrix = np.stack([mol["labels"].numpy() for mol in all_molecules], axis=0)
         indices = np.arange(len(all_molecules))
 
         # 3. Choix de la stratégie de split (Hold-out classique ou Validation Croisée K-Fold)
@@ -200,9 +213,7 @@ class OdomolDataModule(LightningDataModule):
                     f"(doit être dans [0, {num_folds - 1}])."
                 )
             if split_choice == "scaffold":
-                log.info(
-                    f"Application du Scaffold K-Fold Split (pli {fold_index + 1}/{num_folds})..."
-                )
+                log.info(f"Application du Scaffold K-Fold Split (pli {fold_index + 1}/{num_folds})...")
                 train_idx, val_idx = scaffold_kfold_split(
                     all_molecules=all_molecules,
                     num_folds=num_folds,
@@ -210,9 +221,7 @@ class OdomolDataModule(LightningDataModule):
                     seed=self.hparams.seed,
                 )
             elif split_choice == "stratified":
-                log.info(
-                    f"Application du Split K-Fold Stratifié Multi-Label (pli {fold_index + 1}/{num_folds})..."
-                )
+                log.info(f"Application du Split K-Fold Stratifié Multi-Label (pli {fold_index + 1}/{num_folds})...")
                 mskf = MultilabelStratifiedKFold(
                     n_splits=num_folds,
                     shuffle=True,
@@ -227,8 +236,8 @@ class OdomolDataModule(LightningDataModule):
                 )
             log.info(
                 f"Split K-Fold [{self.hparams.split_type}, pli {fold_index + 1}/{num_folds}] -> "
-                f"Train : {len(train_idx)} molécules ({len(train_idx)/len(all_molecules)*100:.1f}%), "
-                f"Val : {len(val_idx)} molécules ({len(val_idx)/len(all_molecules)*100:.1f}%)"
+                f"Train : {len(train_idx)} molécules ({len(train_idx) / len(all_molecules) * 100:.1f}%), "
+                f"Val : {len(val_idx)} molécules ({len(val_idx) / len(all_molecules) * 100:.1f}%)"
             )
         else:
             if split_choice == "scaffold":
@@ -253,8 +262,8 @@ class OdomolDataModule(LightningDataModule):
                 )
             log.info(
                 f"Split effectué [{self.hparams.split_type}] -> "
-                f"Train : {len(train_idx)} molécules ({len(train_idx)/len(all_molecules)*100:.1f}%), "
-                f"Val : {len(val_idx)} molécules ({len(val_idx)/len(all_molecules)*100:.1f}%)"
+                f"Train : {len(train_idx)} molécules ({len(train_idx) / len(all_molecules) * 100:.1f}%), "
+                f"Val : {len(val_idx)} molécules ({len(val_idx) / len(all_molecules) * 100:.1f}%)"
             )
 
         self.train_idx = np.asarray(train_idx, dtype=np.int64)
@@ -291,51 +300,93 @@ class OdomolDataModule(LightningDataModule):
         train_molecules = [all_molecules[i] for i in train_idx]
         val_molecules = [all_molecules[i] for i in val_idx]
 
-        # 4. Instanciation séparée :
-        # - Train : is_train=True (20 conformères + permutation + jittering 3D)
-        # - Val   : is_train=False (1 seul conformère fixe, zéro bruit, zéro permutation)
-        self.data_train = Conformer3DDataset(
-            molecules=train_molecules,
-            label_names=label_names,
-            dictionary=self.dictionary,
-            is_train=True,
-            jitter_min=self.hparams.jitter_min,
-            jitter_max=self.hparams.jitter_max,
-            permute_atoms=self.hparams.permute_atoms,
-            dynamic_augmentation=self.hparams.dynamic_augmentation,
-        )
+        # 4. Instanciation séparée selon la génération du backbone (Uni-Mol v1 vs Uni-Mol2) :
+        if self._is_unimol2:
+            max_atoms = int(getattr(self.hparams, "max_atoms", 128))
+            v2_cache_key = (data_key, max_atoms)
+            if v2_cache_key not in self._shared_v2_graph_cache:
+                log.info(
+                    f"Pré-calcul en mémoire des graphes topologiques 2D RDKit pour Uni-Mol2 "
+                    f"({len(all_molecules)} molécules, max_atoms={max_atoms})..."
+                )
+                all_graphs = [
+                    extract_unimol2_graph_tensors(mol["smiles"], max_atoms=max_atoms) for mol in all_molecules
+                ]
+                all_heavy_masks = [(mol["atomic_numbers"] != 1) for mol in all_molecules]
+                self._shared_v2_graph_cache[v2_cache_key] = (all_graphs, all_heavy_masks)
 
-        self.data_val = Conformer3DDataset(
-            molecules=val_molecules,
-            label_names=label_names,
-            dictionary=self.dictionary,
-            is_train=False,
-        )
+            all_graphs, all_heavy_masks = self._shared_v2_graph_cache[v2_cache_key]
+            train_graphs = [all_graphs[i] for i in train_idx]
+            val_graphs = [all_graphs[i] for i in val_idx]
+            train_heavy_masks = [all_heavy_masks[i] for i in train_idx]
+            val_heavy_masks = [all_heavy_masks[i] for i in val_idx]
+
+            self.data_train = Conformer3DUniMol2Dataset(
+                molecules=train_molecules,
+                graph_cache=train_graphs,
+                heavy_masks=train_heavy_masks,
+                label_names=label_names,
+                is_train=True,
+                jitter_min=self.hparams.jitter_min,
+                jitter_max=self.hparams.jitter_max,
+                max_atoms=max_atoms,
+                dynamic_augmentation=self.hparams.dynamic_augmentation,
+            )
+            self.data_val = Conformer3DUniMol2Dataset(
+                molecules=val_molecules,
+                graph_cache=val_graphs,
+                heavy_masks=val_heavy_masks,
+                label_names=label_names,
+                is_train=False,
+                max_atoms=max_atoms,
+            )
+        else:
+            # - Train : is_train=True (20 conformères + permutation + jittering 3D)
+            # - Val   : is_train=False (1 seul conformère fixe, zéro bruit, zéro permutation)
+            max_atoms = int(getattr(self.hparams, "max_atoms", 256))
+            self.data_train = Conformer3DDataset(
+                molecules=train_molecules,
+                label_names=label_names,
+                dictionary=self.dictionary,
+                is_train=True,
+                jitter_min=self.hparams.jitter_min,
+                jitter_max=self.hparams.jitter_max,
+                permute_atoms=self.hparams.permute_atoms,
+                max_atoms=max_atoms,
+                dynamic_augmentation=self.hparams.dynamic_augmentation,
+            )
+
+            self.data_val = Conformer3DDataset(
+                molecules=val_molecules,
+                label_names=label_names,
+                dictionary=self.dictionary,
+                is_train=False,
+                max_atoms=max_atoms,
+            )
+
+    def _get_collate_fn(self):
+        if self._is_unimol2:
+            return unimol2_tensor_collate_fn
+        return partial(unimol_tensor_collate_fn, pad_idx=self.pad_idx)
 
     def train_dataloader(self) -> DataLoader:
-        collate_fn = partial(unimol_tensor_collate_fn, pad_idx=self.pad_idx)
         return DataLoader(
             dataset=self.data_train,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
-            persistent_workers=(
-                self.hparams.persistent_workers if self.hparams.num_workers > 0 else False
-            ),
+            persistent_workers=(self.hparams.persistent_workers if self.hparams.num_workers > 0 else False),
             shuffle=True,
-            collate_fn=collate_fn,
+            collate_fn=self._get_collate_fn(),
         )
 
     def val_dataloader(self) -> DataLoader:
-        collate_fn = partial(unimol_tensor_collate_fn, pad_idx=self.pad_idx)
         return DataLoader(
             dataset=self.data_val,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
-            persistent_workers=(
-                self.hparams.persistent_workers if self.hparams.num_workers > 0 else False
-            ),
+            persistent_workers=(self.hparams.persistent_workers if self.hparams.num_workers > 0 else False),
             shuffle=False,
-            collate_fn=collate_fn,
+            collate_fn=self._get_collate_fn(),
         )

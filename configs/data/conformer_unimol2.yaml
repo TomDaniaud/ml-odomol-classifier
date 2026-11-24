@@ -1,0 +1,21 @@
+_target_: src.data.datamodule.OdomolDataModule
+
+data_file: ${paths.root_dir}/data/conformers_3d_dataset_100_000.pt
+backbone_version: unimol2
+max_atoms: 128
+
+batch_size: 8
+val_split: 0.2
+split_type: stratified  # 'stratified' ou 'scaffold'
+num_folds: 1  # Mettre à K (ex: 5) pour activer la validation croisée K-Fold
+fold_index: 0  # Indice du pli de validation dans [0, num_folds - 1]
+num_workers: 0
+pin_memory: False
+persistent_workers: False
+seed: ${seed}
+
+jitter_min: 0.01
+jitter_max: 0.04
+permute_atoms: False  # Uni-Mol2 est invariant par permutation et utilise des matrices de graphe 2D indexées
+max_pos_weight: 20.0
+dynamic_augmentation: true
